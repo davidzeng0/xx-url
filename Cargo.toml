@@ -1,0 +1,24 @@
+[package]
+name = "xx-url"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+enumflags2 = "0.7.8"
+base64 = "0.21.4"
+http = "0.2.9"
+log = "0.4.20"
+num-derive = "0.4.1"
+num-traits = "0.2.17"
+rand = "0.8.5"
+resolv-conf = "0.7.0"
+rustls = { version = "0.21.7", default-features = false, features = ["tls12"] }
+rustls-pemfile = "1.0.3"
+thiserror = "1.0.49"
+hickory-proto = { version = "0.24.0", default-features = false }
+url = "2.4.1"
+x509-parser = "0.15.1"
+memchr = "2.6.4"
+rust-crypto = "0.2.36"
+xx-core = { git = "https://github.com/davidzeng0/xx-core.git" }
+xx-pulse = { git = "https://github.com/davidzeng0/xx-pulse.git" }
