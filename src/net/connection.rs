@@ -10,7 +10,6 @@ use enumflags2::{make_bitflags, BitFlags};
 use xx_async_runtime::Context;
 use xx_core::{
 	async_std::io::*,
-	coroutines::{async_trait_fn, check_interrupt},
 	debug,
 	error::*,
 	os::{
@@ -295,12 +294,28 @@ impl Read<Context> for Connection {
 	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		self.recv(buf, 0).await
 	}
+
+	fn is_read_vectored(&self) -> bool {
+		true
+	}
+
+	async fn async_read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
+		self.recv_vectored(bufs, 0).await
+	}
 }
 
 #[async_trait_fn]
 impl Write<Context> for Connection {
 	async fn async_write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.send(buf, 0).await
+	}
+
+	fn is_write_vectored(&self) -> bool {
+		true
+	}
+
+	async fn async_write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
+		self.send_vectored(bufs, 0).await
 	}
 }
 

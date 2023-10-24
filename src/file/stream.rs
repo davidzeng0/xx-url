@@ -1,7 +1,7 @@
 use std::io::SeekFrom;
 
 use xx_async_runtime::Context;
-use xx_core::{async_std::io::*, coroutines::async_trait_fn, error::Result, read_into};
+use xx_core::{async_std::io::*, error::Result, read_into};
 use xx_pulse::*;
 
 use super::Request;

@@ -3,9 +3,7 @@ use std::{collections::HashMap, mem::size_of, str::from_utf8_unchecked};
 use http::Method;
 use memchr::memchr;
 use xx_async_runtime::Context;
-use xx_core::{
-	async_std::io::*, coroutines::async_trait_fn, error::*, opt::hint::*, read_into, warn
-};
+use xx_core::{async_std::io::*, error::*, opt::hint::*, read_into, warn};
 use xx_pulse::*;
 
 use super::{stream::HttpStream, transfer::*};
@@ -159,7 +157,7 @@ impl Body {
 			}
 
 			amount *= 2;
-			amount = amount.max(self.reader.capacity());
+			amount = amount.min(self.reader.capacity());
 		}
 
 		if let Transfer::Chunks(ChunkedState::Extension(size)) = self.transfer {

@@ -11,7 +11,6 @@ use x509_parser::prelude::*;
 use xx_async_runtime::Context;
 use xx_core::{
 	async_std::io::*,
-	coroutines::{async_trait_fn, runtime::*, AsyncContext},
 	debug,
 	error::*,
 	os::{
@@ -238,12 +237,14 @@ impl TlsConn {
 		Ok(Self::connect_stats(options).await?.0)
 	}
 
-	pub async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
-		match io::Read::read(&mut self.tls.reader(), buf) {
+	async fn tls_read(
+		&mut self, mut read: impl FnMut(&mut ClientConnection) -> io::Result<usize>
+	) -> Result<usize> {
+		match read(&mut self.tls) {
 			Ok(0) => (),
 			Ok(n) => return Ok(n),
-			Err(err) if err.kind() != ErrorKind::WouldBlock => return Err(err.into()),
-			Err(_) => ()
+			Err(err) if err.kind() == ErrorKind::WouldBlock => (),
+			Err(err) => return Err(err.into())
 		}
 
 		loop {
@@ -264,15 +265,27 @@ impl TlsConn {
 				continue;
 			}
 
-			break Ok(io::Read::read(&mut self.tls.reader(), buf)?);
+			break Ok(read(&mut self.tls)?);
 		}
 	}
 
-	pub async fn send(&mut self, buf: &[u8]) -> Result<usize> {
+	pub async fn recv(&mut self, buf: &mut [u8]) -> Result<usize> {
+		self.tls_read(move |tls| io::Read::read(&mut tls.reader(), buf))
+			.await
+	}
+
+	pub async fn recv_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
+		self.tls_read(|tls| io::Read::read_vectored(&mut tls.reader(), bufs))
+			.await
+	}
+
+	async fn tls_write(
+		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
+	) -> Result<usize> {
 		self.inner.context = get_context().await;
 
 		loop {
-			let wrote = io::Write::write(&mut self.tls.writer(), buf)?;
+			let wrote = write(&mut self.tls)?;
 
 			while self.tls.wants_write() {
 				if self.tls.write_tls(&mut self.inner)? == 0 {
@@ -290,6 +303,16 @@ impl TlsConn {
 		}
 	}
 
+	pub async fn send(&mut self, buf: &[u8]) -> Result<usize> {
+		self.tls_write(|tls| io::Write::write(&mut tls.writer(), buf))
+			.await
+	}
+
+	pub async fn send_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
+		self.tls_write(|tls| io::Write::write_vectored(&mut tls.writer(), bufs))
+			.await
+	}
+
 	pub fn has_peer_hungup(&mut self) -> Result<bool> {
 		self.inner.has_peer_hungup()
 	}
@@ -304,12 +327,28 @@ impl Read<Context> for TlsConn {
 	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		self.recv(buf).await
 	}
+
+	fn is_read_vectored(&self) -> bool {
+		true
+	}
+
+	async fn async_read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
+		self.recv_vectored(bufs).await
+	}
 }
 
 #[async_trait_fn]
 impl Write<Context> for TlsConn {
 	async fn async_write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.send(buf).await
+	}
+
+	fn is_write_vectored(&self) -> bool {
+		true
+	}
+
+	async fn async_write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
+		self.send_vectored(bufs).await
 	}
 }
 

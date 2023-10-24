@@ -10,7 +10,7 @@ use hickory_proto::{
 	xfer::DnsResponse
 };
 use xx_async_runtime::Context;
-use xx_core::{coroutines::async_trait_fn, error::*, trace};
+use xx_core::{error::*, trace};
 use xx_pulse::*;
 
 use super::{

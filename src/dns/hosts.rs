@@ -6,7 +6,6 @@ use hickory_proto::{
 };
 use xx_core::{
 	async_std::{io::*, AsyncIteratorExt},
-	coroutines::{async_trait_fn, AsyncContext},
 	error::*,
 	warn
 };

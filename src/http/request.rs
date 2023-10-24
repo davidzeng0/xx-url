@@ -3,11 +3,7 @@ use std::ops::{Deref, DerefMut};
 use http::Method;
 use url::Url;
 use xx_async_runtime::Context;
-use xx_core::{
-	coroutines::{AsyncContext, AsyncTask},
-	error::*,
-	task::*
-};
+use xx_core::{error::*, task::*};
 use xx_pulse::*;
 
 use super::{transfer::Request, Response};

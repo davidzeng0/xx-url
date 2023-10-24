@@ -1,0 +1,37 @@
+use num_derive::FromPrimitive;
+use pnet_macros::packet;
+use pnet_macros_support::types::{u1, u3, u4, u7};
+
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, FromPrimitive)]
+#[repr(i8)]
+pub enum Op {
+	#[default]
+	Invalid      = -1,
+	Continuation = 0x0,
+	Text         = 0x1,
+	Binary       = 0x2,
+	Close        = 0x8,
+	Ping         = 0x9,
+	Pong         = 0xa
+}
+
+impl Op {
+	pub fn is_control(&self) -> bool {
+		match self {
+			Op::Ping | Op::Pong | Op::Close => true,
+			_ => false
+		}
+	}
+}
+
+#[packet]
+pub struct FrameHeader {
+	pub fin: u1,
+	pub resv: u3,
+	pub op: u4,
+	pub masked: u1,
+	pub len: u7,
+
+	#[payload]
+	pub payload: Vec<u8>
+}

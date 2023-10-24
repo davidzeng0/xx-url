@@ -1,20 +1,42 @@
 use std::io::{IoSlice, IoSliceMut};
 
 use xx_async_runtime::Context;
-use xx_core::{async_std::io::*, coroutines::*, error::Result};
+use xx_core::{async_std::io::*, error::Result, os::socket::Shutdown};
 use xx_pulse::*;
 
-pub(crate) trait Inner: Read<Context> + Write<Context> {}
+use crate::{net::connection::Connection, tls::connection::TlsConn};
 
-impl<T: Read<Context> + Write<Context>> Inner for T {}
+#[async_trait_fn]
+pub(crate) trait Inner: Read<Context> + Write<Context> {
+	async fn async_shutdown(&mut self, how: Shutdown) -> Result<()>;
+}
+
+#[async_trait_fn]
+impl Inner for Connection {
+	async fn async_shutdown(&mut self, how: Shutdown) -> Result<()> {
+		self.shutdown(how).await
+	}
+}
+
+#[async_trait_fn]
+impl Inner for TlsConn {
+	async fn async_shutdown(&mut self, how: Shutdown) -> Result<()> {
+		self.shutdown(how).await
+	}
+}
 
 pub struct HttpStream {
 	inner: Box<dyn Inner>
 }
 
+#[async_fn]
 impl HttpStream {
 	pub(crate) fn new(inner: impl Inner + 'static) -> Self {
 		Self { inner: Box::new(inner) }
+	}
+
+	pub async fn shutdown(&mut self, how: Shutdown) -> Result<()> {
+		self.inner.async_shutdown(how, get_context().await)
 	}
 }
 

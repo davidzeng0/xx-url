@@ -20,5 +20,7 @@ url = "2.4.1"
 x509-parser = "0.15.1"
 memchr = "2.6.4"
 rust-crypto = "0.2.36"
+pnet_macros = "0.34.0"
+pnet_macros_support = "0.34.0"
 xx-core = { git = "https://github.com/davidzeng0/xx-core.git" }
 xx-pulse = { git = "https://github.com/davidzeng0/xx-pulse.git" }

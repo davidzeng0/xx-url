@@ -17,6 +17,7 @@ use crate::{net::connection::*, tls::connection::TlsConn};
 
 const REDIRECT_REUSE_THRESHOLD: u64 = 4 * 1024;
 
+#[derive(Clone)]
 pub(crate) struct Options {
 	/* connect options */
 	pub port: u16,
@@ -51,6 +52,7 @@ impl Options {
 	}
 }
 
+#[derive(Clone)]
 pub struct Request {
 	pub(crate) url: Url,
 	pub(crate) method: Method,
@@ -477,7 +479,7 @@ pub async fn transfer(
 					.remaining()
 					.is_some_and(|len| len < REDIRECT_REUSE_THRESHOLD)
 				{
-					// TODO reuse connection here
+					// TODO store connection for reuse later
 				}
 
 				redirected_url = response.url;

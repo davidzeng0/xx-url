@@ -1,10 +1,6 @@
 use url::Url;
 use xx_async_runtime::Context;
-use xx_core::{
-	coroutines::{AsyncContext, AsyncTask},
-	error::*,
-	task::Handle
-};
+use xx_core::{error::*, task::Handle};
 use xx_pulse::*;
 
 use super::stream::FileStream;

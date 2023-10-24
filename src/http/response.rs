@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use http::StatusCode;
 use url::Url;
-use xx_core::{async_std::io::ReadExt, coroutines::runtime::*, error::*};
+use xx_core::{async_std::io::ReadExt, error::*};
 use xx_pulse::*;
 
 use super::{
