@@ -8,7 +8,6 @@ use std::{
 use enumflags2::BitFlags;
 use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
-use xx_async_runtime::Context;
 use xx_core::{
 	async_std::io::*,
 	debug,
@@ -17,7 +16,7 @@ use xx_core::{
 		poll::PollFlag,
 		socket::{MessageFlag, Shutdown}
 	},
-	task::env::Handle
+	task::Handle
 };
 use xx_pulse::*;
 
@@ -60,13 +59,13 @@ impl DerefMut for AsyncConnection {
 impl io::Read for AsyncConnection {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		self.connection
-			.async_read(buf, self.context)
+			.async_trait_read(buf, self.context)
 			.map_err(|err| err.into())
 	}
 
 	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
 		self.connection
-			.async_read_vectored(bufs, self.context)
+			.async_trait_read_vectored(bufs, self.context)
 			.map_err(|err| err.into())
 	}
 }
@@ -322,9 +321,9 @@ impl TlsConn {
 	}
 }
 
-#[async_trait_fn]
-impl Read<Context> for TlsConn {
-	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
+#[async_trait_impl]
+impl Read for TlsConn {
+	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		self.recv(buf).await
 	}
 
@@ -332,14 +331,14 @@ impl Read<Context> for TlsConn {
 		true
 	}
 
-	async fn async_read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
+	async fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
 		self.recv_vectored(bufs).await
 	}
 }
 
-#[async_trait_fn]
-impl Write<Context> for TlsConn {
-	async fn async_write(&mut self, buf: &[u8]) -> Result<usize> {
+#[async_trait_impl]
+impl Write for TlsConn {
+	async fn write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.send(buf).await
 	}
 
@@ -347,14 +346,7 @@ impl Write<Context> for TlsConn {
 		true
 	}
 
-	async fn async_write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
+	async fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
 		self.send_vectored(bufs).await
-	}
-}
-
-#[async_trait_fn]
-impl Close<Context> for TlsConn {
-	async fn async_close(self) -> Result<()> {
-		self.close().await
 	}
 }

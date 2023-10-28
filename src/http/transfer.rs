@@ -8,7 +8,6 @@ use http::{Method, StatusCode};
 use memchr::memchr;
 use num_traits::FromPrimitive;
 use url::{Position, Url};
-use xx_async_runtime::Context;
 use xx_core::{async_std::io::*, debug, error::*, trace, warn};
 use xx_pulse::*;
 
@@ -165,7 +164,7 @@ async fn get_connection_for(
 
 #[async_fn]
 pub async fn send_request(
-	writer: &mut impl Write<Context>, request: &Request, url: &Url, version: Version
+	writer: &mut impl Write, request: &Request, url: &Url, version: Version
 ) -> Result<()> {
 	macro_rules! http_write {
 		($writer: expr, $($arg: tt)*) => {
@@ -212,12 +211,8 @@ pub async fn send_request(
 }
 
 #[async_fn]
-async fn read_line_in_place(reader: &mut impl BufRead<Context>) -> Result<(&str, usize)> {
+async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> {
 	let mut offset = 0;
-
-	if reader.buffer().len() == 0 {
-		reader.discard();
-	}
 
 	loop {
 		let available = reader.buffer();
@@ -245,7 +240,7 @@ async fn read_line_in_place(reader: &mut impl BufRead<Context>) -> Result<(&str,
 		} else {
 			Err(Error::new(
 				ErrorKind::UnexpectedEof,
-				"Expected a header line"
+				"Stream ended on a header line"
 			))
 		};
 	}
@@ -286,7 +281,7 @@ fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
 
 #[async_fn]
 pub async fn read_header_line_limited(
-	reader: &mut impl BufRead<Context>
+	reader: &mut impl BufRead
 ) -> Result<Option<(String, Option<String>, usize)>> {
 	let (line, offset) = read_line_in_place(reader).await?;
 
@@ -311,8 +306,8 @@ pub async fn read_header_line_limited(
 
 #[async_fn]
 pub async fn read_headers_limited<T>(
-	reader: &mut impl BufRead<Context>, headers: &mut HashMap<String, String>,
-	mut size_limit: usize, log: &T
+	reader: &mut impl BufRead, headers: &mut HashMap<String, String>, mut size_limit: usize,
+	log: &T
 ) -> Result<()> {
 	loop {
 		let (key, value, read) = match read_header_line_limited(reader).await? {
@@ -344,7 +339,7 @@ pub async fn read_headers_limited<T>(
 
 #[async_fn]
 pub async fn parse_response(
-	reader: &mut impl BufRead<Context>, request: &Request, headers: &mut HashMap<String, String>
+	reader: &mut impl BufRead, request: &Request, headers: &mut HashMap<String, String>
 ) -> Result<(StatusCode, Version)> {
 	let mut total_size = 0;
 
@@ -379,7 +374,7 @@ pub async fn parse_response(
 		reader.consume(offset);
 		result
 	}
-	.ok_or(Error::new(ErrorKind::InvalidData, "Invalid header line"))?;
+	.ok_or_else(|| Error::new(ErrorKind::InvalidData, "Invalid header line"))?;
 
 	trace!(target: request, ">> {} {}", version.as_str(), status);
 
@@ -418,7 +413,7 @@ pub struct Response {
 #[async_fn]
 pub async fn transfer(
 	request: &Request, connection_pool: Option<()>
-) -> Result<(Response, BufReader<Context, HttpStream>)> {
+) -> Result<(Response, BufReader<HttpStream>)> {
 	let mut url = &request.url;
 	let mut redirected_url = None;
 	let mut redirects_remaining = request.options.follow_redirect;
@@ -429,7 +424,7 @@ pub async fn transfer(
 		debug!(target: request, "== Starting request for '{}'", url.as_str());
 
 		let (conn, stats) = get_connection_for(request, url, connection_pool).await?;
-		let mut stats = stats.unwrap_or(Stats::default());
+		let mut stats = stats.unwrap_or_else(|| Stats::default());
 
 		let (stream, mut buf, _) = {
 			let mut writer = BufWriter::from_parts(conn.stream, conn.buf);

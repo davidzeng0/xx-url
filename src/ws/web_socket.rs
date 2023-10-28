@@ -4,7 +4,6 @@ use std::{
 };
 
 use num_traits::FromPrimitive;
-use xx_async_runtime::Context;
 use xx_core::{
 	async_std::{io::*, AsyncIterator},
 	debug,
@@ -26,9 +25,7 @@ pub struct FrameHeader {
 }
 
 #[async_fn]
-async fn decode_length(
-	len: u8, reader: &mut TypedReader<Context, impl BufRead<Context>>
-) -> Result<u64> {
+async fn decode_length(len: u8, reader: &mut TypedReader<impl BufRead>) -> Result<u64> {
 	if len < 0x7e {
 		Ok(len as u64)
 	} else if len == 0x7e {
@@ -56,7 +53,7 @@ fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 
 #[async_fn]
 impl FrameHeader {
-	async fn read(reader: &mut impl BufRead<Context>) -> Result<Self> {
+	async fn read(reader: &mut impl BufRead) -> Result<Self> {
 		let mut reader = TypedReader::new(reader.as_ref());
 		let flags: [u8; 2] = reader.read_type_or_err().await?;
 
@@ -84,7 +81,7 @@ impl FrameHeader {
 		let len = encode_len(self.len, writer)?;
 
 		let mut flags = MutableFrameHeaderPacket::new(&mut writer.get_mut()[pos as usize..])
-			.ok_or(Error::Simple(ErrorKind::InvalidInput))?;
+			.ok_or_else(|| Error::Simple(ErrorKind::InvalidInput))?;
 		flags.set_fin(self.fin as u8);
 		flags.set_resv(0);
 		flags.set_op(self.op as u8);
@@ -167,7 +164,9 @@ impl<'a> Reader<'a> {
 			let available = self.web_socket.stream.buffer().len();
 			let consume = available.min(header.len as usize);
 
-			self.web_socket.stream.discard();
+			unsafe {
+				self.web_socket.stream.consume_unchecked(consume);
+			}
 
 			header.len -= consume as u64;
 
@@ -256,10 +255,8 @@ impl<'a> Frames<'a> {
 				.checked_sub(buf.len() as u64);
 			let remaining = remaining.map(|len| len.checked_sub(frame.len)).flatten();
 
-			remaining.ok_or(Error::new(
-				ErrorKind::Other,
-				"Maximum message length exceeded"
-			))?;
+			remaining
+				.ok_or_else(|| Error::new(ErrorKind::Other, "Maximum message length exceeded"))?;
 
 			buf.reserve(frame.len as usize);
 
@@ -298,11 +295,11 @@ impl<'a> Frames<'a> {
 	}
 }
 
-impl<'a> AsyncIterator<Context> for Frames<'a> {
+#[async_trait_impl]
+impl<'a> AsyncIterator for Frames<'a> {
 	type Item = Result<Frame>;
 
-	#[async_trait_fn]
-	async fn async_next(&mut self) -> Option<Self::Item> {
+	async fn next(&mut self) -> Option<Self::Item> {
 		if self.reader.web_socket.can_read() {
 			Some(self.next_frame().await)
 		} else {
@@ -406,7 +403,7 @@ impl<'a> Writer<'a> {
 }
 
 pub struct WebSocket {
-	stream: BufReader<Context, HttpStream>,
+	stream: BufReader<HttpStream>,
 
 	/* request options */
 	max_message_length: u64,

@@ -5,14 +5,17 @@ use std::{
 };
 
 use hickory_proto::{op::Query, rr::*};
-use xx_async_runtime::Context;
 use xx_core::{debug, error::*, trace};
 use xx_pulse::*;
 
-use super::{config::Config, hosts::Hosts, lookup::LookupService};
+use super::{
+	config::Config,
+	hosts::Hosts,
+	lookup::{Lookup, LookupExt}
+};
 
 pub struct Resolver {
-	services: Vec<LookupService<Context>>
+	services: Vec<Box<dyn Lookup>>
 }
 
 #[derive(Debug, Default)]
@@ -67,12 +70,12 @@ impl Resolver {
 
 		let mut this = Self { services: Vec::new() };
 
-		this.services.push(LookupService::new(hosts));
+		this.services.push(Box::new(hosts));
 
 		for nameserver in config.name_servers {
 			trace!(target: &this, "++ Name Server {}", nameserver.to_string());
 
-			this.services.push(LookupService::new(nameserver));
+			this.services.push(Box::new(nameserver));
 		}
 
 		Ok(this)

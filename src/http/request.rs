@@ -2,8 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use http::Method;
 use url::Url;
-use xx_async_runtime::Context;
-use xx_core::{error::*, task::*};
+use xx_core::{error::*, task::Handle};
 use xx_pulse::*;
 
 use super::{transfer::Request, Response};
@@ -18,7 +17,9 @@ impl HttpRequest {
 	}
 }
 
-impl AsyncTask<Context, Result<Response>> for HttpRequest {
+impl Task for HttpRequest {
+	type Output = Result<Response>;
+
 	fn run(self, mut context: Handle<Context>) -> Result<Response> {
 		context.run(Response::fetch(&self))
 	}

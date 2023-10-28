@@ -47,7 +47,7 @@ fn create_global_data() -> GlobalData {
 
 		Arc::new(
 			runtime
-				.block_on(Resolver::new)
+				.block_on(Resolver::new())
 				.expect("Failed to initialize DNS resolver")
 		)
 	};

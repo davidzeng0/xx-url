@@ -2,7 +2,6 @@ use std::{collections::HashMap, mem::size_of, str::from_utf8_unchecked};
 
 use http::Method;
 use memchr::memchr;
-use xx_async_runtime::Context;
 use xx_core::{async_std::io::*, error::*, opt::hint::*, read_into, warn};
 use xx_pulse::*;
 
@@ -33,7 +32,7 @@ enum Transfer {
 }
 
 pub struct Body {
-	reader: BufReader<Context, HttpStream>,
+	reader: BufReader<HttpStream>,
 	transfer: Transfer,
 	reusable: bool
 }
@@ -41,7 +40,7 @@ pub struct Body {
 #[async_fn]
 impl Body {
 	pub(crate) fn new(
-		reader: BufReader<Context, HttpStream>, request: &Request, response: &Response
+		reader: BufReader<HttpStream>, request: &Request, response: &Response
 	) -> Result<Self> {
 		let mut body = Self {
 			reader,
@@ -130,7 +129,7 @@ impl Body {
 		} else {
 			None
 		}
-		.ok_or(Error::new(ErrorKind::InvalidData, "Chunk size too large"))?;
+		.ok_or_else(|| Error::new(ErrorKind::InvalidData, "Chunk size overflowed"))?;
 
 		/* index can't be negative here */
 		self.reader.consume(index as usize);
@@ -175,11 +174,6 @@ impl Body {
 
 	async fn read_chunks(&mut self, mut state: ChunkedState, buf: &mut [u8]) -> Result<usize> {
 		loop {
-			if self.reader.buffer().len() == 0 {
-				/* do this so that future fills will start from the beginning */
-				self.reader.discard();
-			}
-
 			match state {
 				ChunkedState::Size => {
 					self.read_chunk_size().await?;
@@ -274,9 +268,9 @@ impl Body {
 	}
 }
 
-impl Read<Context> for Body {
-	#[async_trait_fn]
-	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
+#[async_trait_impl]
+impl Read for Body {
+	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		match &self.transfer {
 			Transfer::Empty | Transfer::Trailers => Ok(0),
 

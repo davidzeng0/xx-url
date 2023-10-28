@@ -1,6 +1,5 @@
 use std::str::from_utf8_unchecked;
 
-use xx_async_runtime::Context;
 use xx_core::{async_std::io::*, debug, error::*};
 use xx_pulse::*;
 
@@ -8,7 +7,7 @@ use super::{consts::*, handshake::Key, WsRequest};
 use crate::http::{stream::HttpStream, transfer::transfer};
 
 #[async_fn]
-pub async fn connect(request: &WsRequest) -> Result<BufReader<Context, HttpStream>> {
+pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 	let mut key_bytes = [0u8; 24];
 	let mut accept_bytes = [0u8; 28];
 
@@ -37,7 +36,12 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<Context, HttpStrea
 
 	let (response, reader) = match select(transfer(&request, None), sleep(timeout)).await {
 		Select::First(conn, _) => conn?,
-		Select::Second(..) => return Err(Error::new(ErrorKind::TimedOut, "Connection timed out"))
+		Select::Second(..) => {
+			return Err(Error::new(
+				ErrorKind::TimedOut,
+				"WebSocket connection timed out"
+			))
+		}
 	};
 
 	macro_rules! check_header {

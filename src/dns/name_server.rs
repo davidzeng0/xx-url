@@ -9,7 +9,6 @@ use hickory_proto::{
 	serialize::binary::BinDecodable,
 	xfer::DnsResponse
 };
-use xx_async_runtime::Context;
 use xx_core::{error::*, trace};
 use xx_pulse::*;
 
@@ -76,8 +75,8 @@ impl ToString for NameServer {
 	}
 }
 
-impl Lookup<Context> for NameServer {
-	#[async_trait_fn]
+#[async_trait_impl]
+impl Lookup for NameServer {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let mut message = Message::new();
 

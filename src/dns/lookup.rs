@@ -1,10 +1,8 @@
 use std::time::Instant;
 
 use hickory_proto::{op::Query, rr::Record};
-use xx_core::{
-	coroutines::{async_fn, async_trait_fn, get_context, AsyncContext},
-	error::Result
-};
+use xx_core::error::*;
+use xx_pulse::*;
 
 #[derive(Clone)]
 pub struct LookupResults {
@@ -35,22 +33,7 @@ impl LookupResults {
 	}
 }
 
-pub trait Lookup<Context: AsyncContext> {
-	#[async_trait_fn]
+#[async_trait]
+pub trait Lookup {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults>;
-}
-
-pub struct LookupService<Context: AsyncContext> {
-	service: Box<dyn Lookup<Context>>
-}
-
-impl<Context: AsyncContext> LookupService<Context> {
-	pub fn new(service: impl Lookup<Context> + 'static) -> Self {
-		Self { service: Box::new(service) }
-	}
-
-	#[async_fn]
-	pub async fn lookup(&self, query: &Query) -> Result<LookupResults> {
-		self.service.lookup(query, get_context().await)
-	}
 }

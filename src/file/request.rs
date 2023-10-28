@@ -1,5 +1,4 @@
 use url::Url;
-use xx_async_runtime::Context;
 use xx_core::{error::*, task::Handle};
 use xx_pulse::*;
 
@@ -42,7 +41,9 @@ impl Request {
 	}
 }
 
-impl AsyncTask<Context, Result<FileStream>> for Request {
+impl Task for Request {
+	type Output = Result<FileStream>;
+
 	fn run(self, mut context: Handle<Context>) -> Result<FileStream> {
 		context.run(FileStream::new(&self))
 	}

@@ -1,6 +1,5 @@
 use std::io::SeekFrom;
 
-use xx_async_runtime::Context;
 use xx_core::{async_std::io::*, error::Result, read_into};
 use xx_pulse::*;
 
@@ -47,9 +46,9 @@ impl FileStream {
 	}
 }
 
-#[async_trait_fn]
-impl Read<Context> for FileStream {
-	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
+#[async_trait_impl]
+impl Read for FileStream {
+	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		let remaining = (self.len() - self.stream_position().await.unwrap()) as usize;
 
 		read_into!(buf, remaining);
@@ -58,9 +57,9 @@ impl Read<Context> for FileStream {
 	}
 }
 
-#[async_trait_fn]
-impl Seek<Context> for FileStream {
-	async fn async_seek(&mut self, seek: SeekFrom) -> Result<u64> {
+#[async_trait_impl]
+impl Seek for FileStream {
+	async fn seek(&mut self, seek: SeekFrom) -> Result<u64> {
 		let pos = match seek {
 			SeekFrom::Current(rel) => self.pos().wrapping_add_signed(rel),
 			SeekFrom::Start(pos) => self.start.wrapping_add(pos),
@@ -74,7 +73,7 @@ impl Seek<Context> for FileStream {
 		true
 	}
 
-	async fn async_stream_len(&mut self) -> Result<u64> {
+	async fn stream_len(&mut self) -> Result<u64> {
 		Ok(self.len())
 	}
 
@@ -82,7 +81,7 @@ impl Seek<Context> for FileStream {
 		true
 	}
 
-	async fn async_stream_position(&mut self) -> Result<u64> {
+	async fn stream_position(&mut self) -> Result<u64> {
 		Ok(self.pos())
 	}
 }

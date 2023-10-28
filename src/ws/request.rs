@@ -5,8 +5,7 @@ use std::{
 
 use http::Method;
 use url::Url;
-use xx_async_runtime::Context;
-use xx_core::{error::*, task::*};
+use xx_core::{error::*, task::Handle};
 use xx_pulse::*;
 
 use super::WebSocket;
@@ -52,7 +51,9 @@ impl WsRequest {
 	}
 }
 
-impl AsyncTask<Context, Result<WebSocket>> for WsRequest {
+impl Task for WsRequest {
+	type Output = Result<WebSocket>;
+
 	fn run(mut self, mut context: Handle<Context>) -> Result<WebSocket> {
 		context.run(WebSocket::new(&mut self))
 	}

@@ -30,7 +30,6 @@ pub struct Hosts {
 impl Hosts {
 	pub async fn new() -> Result<Self> {
 		let mut hosts = Self { name: HashMap::new() };
-
 		let mut lines = BufReader::new(File::open(hosts_path()).await?).lines();
 
 		while let Some(line) = lines.next().await {
@@ -44,7 +43,6 @@ impl Hosts {
 			let mut tokens = line.split_whitespace();
 
 			let ip = tokens.next().unwrap();
-
 			let ip = match ip.parse() {
 				Ok(ip) => ip,
 				Err(_) => {
@@ -107,8 +105,8 @@ impl Hosts {
 	}
 }
 
-impl<Context: AsyncContext> Lookup<Context> for Hosts {
-	#[async_trait_fn]
+#[async_trait_impl]
+impl Lookup for Hosts {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let results = match self.name.get(query.name()) {
 			None => return Err(Error::other(DnsError::NoData)),

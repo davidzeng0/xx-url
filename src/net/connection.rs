@@ -7,7 +7,6 @@ use std::{
 };
 
 use enumflags2::{make_bitflags, BitFlags};
-use xx_async_runtime::Context;
 use xx_core::{
 	async_std::io::*,
 	debug,
@@ -16,9 +15,10 @@ use xx_core::{
 		inet::IpProtocol,
 		poll::{poll, PollFd, PollFlag},
 		socket::{Shutdown, SocketType}
-	}
+	},
+	read_wrapper, write_wrapper
 };
-use xx_pulse::*;
+use xx_pulse::{poll as async_poll, *};
 
 use crate::{
 	dns::resolver::{LookupIp, Resolver},
@@ -228,7 +228,7 @@ impl Connection {
 			)
 			.await
 			.first()
-			.ok_or(Error::new(ErrorKind::TimedOut, "Connection timed out"))??
+			.ok_or_else(|| Error::new(ErrorKind::TimedOut, "Connection timed out"))??
 		};
 
 		if let Some(size) = options.recvbuf_size {
@@ -283,45 +283,22 @@ impl Connection {
 
 	#[async_fn]
 	pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
-		let bits = ops::poll(self.inner.fd(), flags.bits()).await?;
+		let bits = async_poll(self.inner.fd(), flags.bits()).await?;
 
 		Ok(unsafe { BitFlags::from_bits_unchecked(bits) })
 	}
 }
 
-#[async_trait_fn]
-impl Read<Context> for Connection {
-	async fn async_read(&mut self, buf: &mut [u8]) -> Result<usize> {
-		self.recv(buf, 0).await
-	}
-
-	fn is_read_vectored(&self) -> bool {
-		true
-	}
-
-	async fn async_read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
-		self.recv_vectored(bufs, 0).await
+impl Read for Connection {
+	read_wrapper! {
+		inner = inner;
+		mut inner = inner;
 	}
 }
 
-#[async_trait_fn]
-impl Write<Context> for Connection {
-	async fn async_write(&mut self, buf: &[u8]) -> Result<usize> {
-		self.send(buf, 0).await
-	}
-
-	fn is_write_vectored(&self) -> bool {
-		true
-	}
-
-	async fn async_write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
-		self.send_vectored(bufs, 0).await
-	}
-}
-
-#[async_trait_fn]
-impl Close<Context> for Connection {
-	async fn async_close(self) -> Result<()> {
-		self.close().await
+impl Write for Connection {
+	write_wrapper! {
+		inner = inner;
+		mut inner = inner;
 	}
 }
