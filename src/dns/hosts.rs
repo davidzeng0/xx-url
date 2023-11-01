@@ -46,7 +46,7 @@ impl Hosts {
 			let ip = match ip.parse() {
 				Ok(ip) => ip,
 				Err(_) => {
-					warn!(target: &hosts, "Failed to parse ip {}", ip);
+					warn!(target: &hosts, "== Failed to parse ip {}", ip);
 
 					continue;
 				}
@@ -56,7 +56,7 @@ impl Hosts {
 				let host = host.to_lowercase();
 				let name = match Name::from_str(&host) {
 					Err(err) => {
-						warn!(target: &hosts, "Failed to parse hostname '{}': {}", host, err);
+						warn!(target: &hosts, "== Failed to parse hostname '{}': {}", host, err);
 
 						continue;
 					}

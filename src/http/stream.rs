@@ -33,7 +33,7 @@ impl HttpStream {
 	}
 
 	pub async fn shutdown(&mut self, how: Shutdown) -> Result<()> {
-		self.inner.async_trait_shutdown(how, get_context().await)
+		self.inner.shutdown(how).await
 	}
 }
 

@@ -17,8 +17,7 @@ impl FileStream {
 		let mut file = File::open(request.url.path()).await?;
 
 		let mut start = 0;
-		/* file supports stream_len_fast, for now */
-		let mut end = file.stream_len().await.unwrap();
+		let mut end = file.len();
 
 		if let Some(pos) = request.start {
 			start = pos;
@@ -28,10 +27,7 @@ impl FileStream {
 			end = pos;
 		}
 
-		if start > end {
-			end = start;
-		}
-
+		end = end.max(start);
 		file.seek(SeekFrom::Start(start)).await?;
 
 		Ok(Self { file, start, end })
@@ -49,7 +45,7 @@ impl FileStream {
 #[async_trait_impl]
 impl Read for FileStream {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-		let remaining = (self.len() - self.stream_position().await.unwrap()) as usize;
+		let remaining = (self.len() - self.pos()) as usize;
 
 		read_into!(buf, remaining);
 
@@ -61,10 +57,12 @@ impl Read for FileStream {
 impl Seek for FileStream {
 	async fn seek(&mut self, seek: SeekFrom) -> Result<u64> {
 		let pos = match seek {
-			SeekFrom::Current(rel) => self.pos().wrapping_add_signed(rel),
-			SeekFrom::Start(pos) => self.start.wrapping_add(pos),
-			SeekFrom::End(pos) => self.end.wrapping_add_signed(pos)
+			SeekFrom::Current(rel) => self.pos().checked_add_signed(rel).unwrap(),
+			SeekFrom::Start(pos) => self.start.checked_add(pos).unwrap(),
+			SeekFrom::End(pos) => self.end.checked_add_signed(pos).unwrap()
 		};
+
+		let pos = pos.clamp(self.start, self.end);
 
 		self.file.seek(SeekFrom::Start(pos)).await
 	}

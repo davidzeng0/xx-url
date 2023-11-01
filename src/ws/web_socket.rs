@@ -278,7 +278,7 @@ impl<'a> Frames<'a> {
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
 					Op::Text => {
-						Frame::Text(String::from_utf8(buf).map_err(Error::invalid_data_error)?)
+						Frame::Text(String::from_utf8(buf).map_err(|_| invalid_utf8_error())?)
 					}
 					_ => unreachable!()
 				})
@@ -393,7 +393,7 @@ impl<'a> Writer<'a> {
 			)
 			.await
 			{
-				Select::First(..) => debug!(target: self, "Close not clean"),
+				Select::First(..) => debug!(target: self, "== Close was not clean"),
 				_ => ()
 			}
 		}

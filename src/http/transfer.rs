@@ -14,6 +14,8 @@ use xx_pulse::*;
 use super::{stream::HttpStream, *};
 use crate::{net::connection::*, tls::connection::TlsConn};
 
+/* maximum allowed Content-Length header if we want to reuse a connection for
+ * redirect instead of closing it and opening a new one */
 const REDIRECT_REUSE_THRESHOLD: u64 = 4 * 1024;
 
 #[derive(Clone)]
@@ -326,7 +328,7 @@ pub async fn read_headers_limited<T>(
 		}
 
 		let value = value.unwrap_or_else(|| {
-			warn!(target: log, "Header separator not found");
+			warn!(target: log, "== Header separator not found");
 
 			"".to_string()
 		});
@@ -357,6 +359,7 @@ pub async fn parse_response(
 			));
 		}
 
+		/* unchecked because if it's binary, that's still valid for HTTP/0.9 */
 		let actual = unsafe { from_utf8_unchecked(&reader.buffer()[0..prefix.len()]) };
 
 		prefix.eq_ignore_ascii_case(actual)
@@ -415,6 +418,7 @@ pub async fn transfer(
 	request: &Request, connection_pool: Option<()>
 ) -> Result<(Response, BufReader<HttpStream>)> {
 	let mut url = &request.url;
+
 	let mut redirected_url = None;
 	let mut redirects_remaining = request.options.follow_redirect;
 
@@ -440,9 +444,8 @@ pub async fn transfer(
 		response_headers.clear();
 
 		let (response, reader) = {
-			let len = buf.len();
 			let start = Instant::now();
-			let mut reader = BufReader::from_parts(stream, buf, len);
+			let mut reader = BufReader::from_parts(stream, buf, 0);
 
 			reader.fill().await?;
 			stats.wait = start.elapsed();

@@ -38,7 +38,7 @@ impl NameServer {
 			let message = Message::from_bytes(&buf[0..len]).map_err(Error::other)?;
 
 			if message.id() != id {
-				trace!(target: self, "Got mismatching message ids: {} =/= {}", id, message.id());
+				trace!(target: self, "== Got mismatching message ids: {} =/= {}", id, message.id());
 
 				continue;
 			}

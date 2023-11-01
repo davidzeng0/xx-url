@@ -28,6 +28,8 @@ enum Transfer {
 
 	/// Transfer-Encoding: Chunked
 	Chunks(ChunkedState),
+
+	/// Chunked trailers
 	Trailers
 }
 
@@ -99,24 +101,25 @@ impl Body {
 
 	async fn read_chunk_size(&mut self) -> Result<()> {
 		/* double the size of u64, double again for hex */
-		let amount = size_of::<u64>() * 2 * 2;
+		let max_hex = size_of::<u64>() * 2 * 2;
 
-		let index = loop {
-			match self
-				.reader
-				.buffer()
-				.iter()
-				.position(|x| !x.is_ascii_hexdigit())
-			{
+		/* assumes the bufreader's capacity is < i32::MAX */
+		let mut index = 0;
+
+		index += loop {
+			let new_bytes = &self.reader.buffer()[index as usize..];
+
+			match new_bytes.iter().position(|x| !x.is_ascii_hexdigit()) {
 				Some(index) => break index as i32,
-				None => ()
+				None => index += new_bytes.len() as i32
 			}
 
-			if self.reader.buffer().len() >= amount {
+			if self.reader.buffer().len() >= max_hex {
 				break -1;
 			}
 
-			if unlikely(self.reader.fill_amount(amount).await? == 0) {
+			/* fill does not discard unconsumed bytes */
+			if unlikely(self.reader.fill().await? == 0) {
 				return Err(Self::eof_error());
 			}
 		};
@@ -139,8 +142,6 @@ impl Body {
 	}
 
 	async fn read_until_newline(&mut self) -> Result<()> {
-		let mut amount = 32;
-
 		loop {
 			match memchr(b'\n', self.reader.buffer()) {
 				None => self.reader.discard(),
@@ -151,12 +152,9 @@ impl Body {
 				}
 			};
 
-			if unlikely(self.reader.fill_amount(amount).await? == 0) {
+			if unlikely(self.reader.fill().await? == 0) {
 				return Err(Self::eof_error());
 			}
-
-			amount *= 2;
-			amount = amount.min(self.reader.capacity());
 		}
 
 		if let Transfer::Chunks(ChunkedState::Extension(size)) = self.transfer {
@@ -231,7 +229,7 @@ impl Body {
 			Some((key, value, read)) => {
 				*out_key = key;
 				*out_val = value.unwrap_or_else(|| {
-					warn!(target: self, "Header separator not found");
+					warn!(target: self, "== Header separator not found");
 
 					"".to_string()
 				});
@@ -271,6 +269,7 @@ impl Body {
 #[async_trait_impl]
 impl Read for Body {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+		/* don't do read_into! here as it's done after calculating remaining bytes */
 		match &self.transfer {
 			Transfer::Empty | Transfer::Trailers => Ok(0),
 

@@ -58,20 +58,23 @@ impl DerefMut for AsyncConnection {
 
 impl io::Read for AsyncConnection {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		self.connection
-			.async_trait_read(buf, self.context)
+		self.context
+			.run(self.connection.read(buf))
 			.map_err(|err| err.into())
 	}
 
 	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-		self.connection
-			.async_trait_read_vectored(bufs, self.context)
+		self.context
+			.run(self.connection.read_vectored(bufs))
 			.map_err(|err| err.into())
 	}
 }
 
 impl io::Write for AsyncConnection {
-	/* we set don't wait only on writes for error state */
+	/* we set don't wait for writes in error state.
+	 * in normal usecase, the flag should have no effect
+	 * due to polling
+	 */
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
 		self.context
 			.run(self.connection.send(buf, MessageFlag::DontWait as u32))
@@ -210,11 +213,16 @@ impl TlsConn {
 	pub async fn connect_stats_config(
 		options: &ConnectOptions, config: Arc<ClientConfig>
 	) -> Result<(TlsConn, ConnectStats)> {
+		let tls = make_client(options, config)?;
+
 		let (connection, stats) = Connection::connect_stats(options).await?;
 
-		let inner = AsyncConnection { context: unsafe { Handle::new_null() }, connection };
-		let tls = make_client(options, config)?;
-		let mut connection = TlsConn { inner, tls };
+		let mut connection = TlsConn {
+			/* context is assigned before read/write operations */
+			inner: AsyncConnection { context: unsafe { Handle::null() }, connection },
+			tls
+		};
+
 		let mut stats = stats.into();
 
 		connection.tls_connect(&mut stats).await?;

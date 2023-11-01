@@ -261,8 +261,8 @@ impl Connection {
 		 */
 		let flags = make_bitflags!(PollFlag::{RdHangUp | HangUp | Error});
 
-		/* sync polling because we don't care about waiting. async polling isn't any
-		 * faster */
+		/* sync polling because we don't care about waiting, and async polling isn't
+		 * any faster */
 		let mut fds = [PollFd {
 			fd: self.inner.fd().as_raw_fd(),
 			events: flags.bits() as u16,
