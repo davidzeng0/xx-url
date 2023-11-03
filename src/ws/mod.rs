@@ -86,7 +86,7 @@ impl ControlFrame {
 	fn new() -> Self {
 		Self {
 			#[allow(invalid_value)]
-			data: unsafe { MaybeUninit::<[u8; 0x7d]>::uninit().assume_init() },
+			data: unsafe { MaybeUninit::uninit().assume_init() },
 			offset: 0,
 			length: 0
 		}

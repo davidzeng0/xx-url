@@ -20,7 +20,7 @@ impl FileStream {
 		let mut end = file.len();
 
 		if let Some(pos) = request.start {
-			start = pos;
+			start = pos.min(end);
 		}
 
 		if let Some(pos) = request.end {

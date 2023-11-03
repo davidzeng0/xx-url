@@ -60,8 +60,6 @@ impl NameServer {
 		)
 		.await;
 
-		socket.close().await?;
-
 		match result {
 			Select::First(len, _) => Ok(len?),
 			Select::Second(..) => Err(Error::new(ErrorKind::TimedOut, "DNS query timed Out"))

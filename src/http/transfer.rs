@@ -1,6 +1,6 @@
 use std::{
 	collections::HashMap,
-	str::{from_utf8_unchecked, FromStr},
+	str::{from_utf8, from_utf8_unchecked, FromStr},
 	time::{Duration, Instant}
 };
 
@@ -219,7 +219,7 @@ async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> 
 	loop {
 		let available = reader.buffer();
 
-		let (used, done) = match memchr(b'\n', unsafe { available.get_unchecked(offset..) }) {
+		let (used, done) = match memchr(b'\n', &available[offset..]) {
 			Some(index) => (index + 1, true),
 			None => (available.len(), false)
 		};
@@ -247,11 +247,7 @@ async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> 
 		};
 	}
 
-	let buf = &mut reader.buffer_mut()[0..offset];
-
-	check_utf8(buf)?;
-
-	let mut line = unsafe { from_utf8_unchecked(buf) };
+	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| invalid_utf8_error())?;
 
 	if let Some(ln) = line.strip_suffix('\n') {
 		line = ln;

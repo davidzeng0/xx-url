@@ -164,7 +164,7 @@ impl Connection {
 
 			let now = Instant::now();
 
-			match connection.inner.connect_addr(&addr).await {
+			match connection.inner.connect(&addr).await {
 				Ok(()) => {
 					let elapsed = start.elapsed();
 
@@ -178,7 +178,6 @@ impl Connection {
 				Err(err) => {
 					debug!(target: &connection, ">> Connection failed to {}: {} ({:.3} ms elapsed)", options.host, err.to_string(), now.elapsed().as_secs_f32() * 1000.0);
 
-					connection.close().await?;
 					error = Some(err);
 
 					check_interrupt().await?;

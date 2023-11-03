@@ -162,23 +162,24 @@ impl<'a> Reader<'a> {
 	pub async fn discard_frame_data(&mut self, header: &mut FrameHeader) -> Result<()> {
 		loop {
 			let available = self.web_socket.stream.buffer().len();
-			let consume = available.min(header.len as usize);
 
-			unsafe {
-				self.web_socket.stream.consume_unchecked(consume);
-			}
+			if header.len > available as u64 {
+				header.len -= available as u64;
 
-			header.len -= consume as u64;
+				self.web_socket.stream.discard();
 
-			if header.len == 0 {
+				if self.web_socket.stream.fill().await? == 0 {
+					return Err(Error::new(
+						ErrorKind::UnexpectedEof,
+						"End of file mid frame"
+					));
+				}
+			} else {
+				self.web_socket.stream.consume(header.len as usize);
+
+				header.len = 0;
+
 				break;
-			}
-
-			if self.web_socket.stream.fill().await? == 0 {
-				return Err(Error::new(
-					ErrorKind::UnexpectedEof,
-					"End of file mid frame"
-				));
 			}
 		}
 
@@ -257,7 +258,6 @@ impl<'a> Frames<'a> {
 
 			remaining
 				.ok_or_else(|| Error::new(ErrorKind::Other, "Maximum message length exceeded"))?;
-
 			buf.reserve(frame.len as usize);
 
 			unsafe {

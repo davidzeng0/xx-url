@@ -1,4 +1,4 @@
-use std::str::from_utf8_unchecked;
+use std::str::from_utf8;
 
 use xx_core::{async_std::io::*, debug, error::*};
 use xx_pulse::*;
@@ -17,12 +17,10 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 		rand.encode(&mut key_bytes);
 		rand.accept(&mut accept_bytes);
 
-		unsafe {
-			(
-				from_utf8_unchecked(&key_bytes),
-				from_utf8_unchecked(&accept_bytes)
-			)
-		}
+		(
+			from_utf8(&key_bytes).unwrap(),
+			from_utf8(&accept_bytes).unwrap()
+		)
 	};
 
 	let timeout = request.options.handshake_timeout;
