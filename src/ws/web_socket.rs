@@ -1,5 +1,6 @@
 use std::{
 	io::{Cursor, IoSlice, Write},
+	net::{SocketAddr, ToSocketAddrs},
 	time::Duration
 };
 
@@ -10,11 +11,17 @@ use xx_core::{
 	error::*,
 	os::socket::Shutdown,
 	pointer::MutPtr,
-	read_into
+	read_into,
+	task::Handle
 };
 use xx_pulse::*;
 
-use super::{transfer::connect, wire::*, BorrowedFrame, ControlFrame, Frame, WsRequest};
+use super::{
+	mask,
+	transfer::{connect, handle_upgrade},
+	wire::*,
+	BorrowedFrame, CloseCode, ControlFrame, Frame, WebSocketOptions, WsRequest
+};
 use crate::http::stream::HttpStream;
 
 pub struct FrameHeader {
@@ -53,9 +60,12 @@ fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 
 #[async_fn]
 impl FrameHeader {
-	async fn read(reader: &mut impl BufRead) -> Result<Self> {
+	async fn read(reader: &mut impl BufRead) -> Result<Option<Self>> {
 		let mut reader = TypedReader::new(reader.as_ref());
-		let flags: [u8; 2] = reader.read_type_or_err().await?;
+		let flags: [u8; 2] = match reader.read_type().await? {
+			Some(flags) => flags,
+			None => return Ok(None)
+		};
 
 		let wire = FrameHeaderPacket::new(&flags).unwrap();
 		let len = decode_length(wire.get_len(), &mut reader).await?;
@@ -65,12 +75,12 @@ impl FrameHeader {
 			None
 		};
 
-		Ok(Self {
+		Ok(Some(Self {
 			fin: wire.get_fin() != 0,
 			op: Op::from_u8(wire.get_op()).unwrap_or(Op::Invalid),
 			mask,
 			len
-		})
+		}))
 	}
 
 	fn write(&self, writer: &mut Cursor<&mut [u8]>) -> Result<()> {
@@ -102,12 +112,19 @@ pub struct Reader<'a> {
 
 #[async_fn]
 impl<'a> Reader<'a> {
-	pub async fn read_frame_header(&mut self) -> Result<FrameHeader> {
+	pub async fn read_frame_header(&mut self) -> Result<Option<FrameHeader>> {
 		if !self.web_socket.can_read() {
 			return Err(Error::new(ErrorKind::Other, "Read end is shutdown"));
 		}
 
-		let frame = FrameHeader::read(&mut self.web_socket.stream).await?;
+		let frame = match FrameHeader::read(&mut self.web_socket.stream).await? {
+			Some(frame) => frame,
+			None => {
+				self.web_socket.shutdown(Shutdown::Read);
+
+				return Ok(None);
+			}
+		};
 
 		if frame.op == Op::Invalid {
 			return Err(Error::new(ErrorKind::InvalidData, "Invalid opcode"));
@@ -156,7 +173,7 @@ impl<'a> Reader<'a> {
 			self.web_socket.shutdown(Shutdown::Read);
 		}
 
-		Ok(frame)
+		Ok(Some(frame))
 	}
 
 	pub async fn discard_frame_data(&mut self, header: &mut FrameHeader) -> Result<()> {
@@ -186,12 +203,12 @@ impl<'a> Reader<'a> {
 		Ok(())
 	}
 
-	pub async fn read_frame_data(
-		&mut self, header: &mut FrameHeader, buf: &mut [u8]
+	async fn stream_read_frame_data(
+		stream: &mut impl BufRead, header: &mut FrameHeader, buf: &mut [u8]
 	) -> Result<usize> {
 		read_into!(buf, header.len as usize);
 
-		match self.web_socket.stream.read_exact_or_err(buf).await {
+		match stream.read_exact_or_err(buf).await {
 			Ok(()) => {
 				header.len -= buf.len() as u64;
 
@@ -206,33 +223,50 @@ impl<'a> Reader<'a> {
 		}
 	}
 
+	pub async fn read_frame_data(
+		&mut self, header: &mut FrameHeader, buf: &mut [u8]
+	) -> Result<usize> {
+		Self::stream_read_frame_data(&mut self.web_socket.stream, header, buf).await
+	}
+
 	pub fn frames(self) -> Frames<'a> {
-		Frames { reader: self, current_message: None }
+		Frames { reader: self }
 	}
 }
 
 pub struct Frames<'a> {
-	reader: Reader<'a>,
-	current_message: Option<(Op, Vec<u8>)>
+	reader: Reader<'a>
 }
 
 #[async_fn]
 impl<'a> Frames<'a> {
 	async fn read_frame(&mut self) -> Result<Option<Frame>> {
-		let mut frame = self.reader.read_frame_header().await?;
+		let mut frame = match self.reader.read_frame_header().await? {
+			Some(frame) => frame,
+			None => {
+				let close = Frame::Close(CloseCode::NoClose as u16, ControlFrame::new());
+
+				return Ok(Some(close));
+			}
+		};
 
 		if frame.op.is_control() {
 			let mut control = ControlFrame::new();
 
+			control.length = ControlFrame::MAX_LENGTH as u8;
 			control.length = self
 				.reader
-				.read_frame_data(&mut frame, &mut control.data)
+				.read_frame_data(&mut frame, control.data_mut())
 				.await? as u8;
+			if let Some(m) = &frame.mask {
+				mask(control.data_mut(), *m);
+			}
+
 			Ok(Some(match frame.op {
 				Op::Ping => Frame::Ping(control),
 				Op::Pong => Frame::Pong(control),
 				Op::Close => {
-					let mut code = 1005;
+					let mut code = CloseCode::NoStatusCode as u16;
 
 					if control.data().len() >= 2 {
 						code = u16::from_be_bytes([control.data()[0], control.data()[1]]);
@@ -245,9 +279,12 @@ impl<'a> Frames<'a> {
 				_ => unreachable!()
 			}))
 		} else {
-			let (_, buf) = self
-				.current_message
-				.get_or_insert_with(|| (frame.op, Vec::new()));
+			let (stream, current_message) = (
+				&mut self.reader.web_socket.stream,
+				&mut self.reader.web_socket.current_message
+			);
+
+			let (_, buf) = current_message.get_or_insert_with(|| (frame.op, Vec::new()));
 
 			let remaining = self
 				.reader
@@ -263,17 +300,21 @@ impl<'a> Frames<'a> {
 			unsafe {
 				let start = buf.len();
 				let end = start + frame.len as usize;
+				let read = buf.get_unchecked_mut(start..end);
 
-				self.reader
-					.read_frame_data(&mut frame, buf.get_unchecked_mut(start..end))
-					.await?;
+				Reader::stream_read_frame_data(stream, &mut frame, read).await?;
+
+				if let Some(m) = &frame.mask {
+					mask(read, *m);
+				}
+
 				buf.set_len(end);
 			}
 
 			Ok(if !frame.fin {
 				None
 			} else {
-				let (op, buf) = self.current_message.take().unwrap();
+				let (op, buf) = current_message.take().unwrap();
 
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
@@ -410,6 +451,8 @@ pub struct WebSocket {
 	close_timeout: Duration,
 
 	last_sent_message_op: Option<Op>,
+	current_message: Option<(Op, Vec<u8>)>,
+
 	is_client: bool,
 	expect_continuation: bool,
 	close_state: Option<Shutdown>
@@ -417,20 +460,30 @@ pub struct WebSocket {
 
 #[async_fn]
 impl WebSocket {
+	fn _new(stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool) -> Self {
+		Self {
+			stream,
+
+			max_message_length: options.max_message_length,
+			close_timeout: options.close_timeout,
+
+			last_sent_message_op: None,
+			current_message: None,
+
+			is_client,
+			expect_continuation: false,
+			close_state: None
+		}
+	}
+
 	pub async fn new(request: &WsRequest) -> Result<Self> {
 		let stream = connect(request).await?;
 
-		Ok(Self {
-			stream,
+		Ok(Self::_new(stream, &request.options, true))
+	}
 
-			max_message_length: request.options.max_message_length,
-			close_timeout: request.options.close_timeout,
-
-			last_sent_message_op: None,
-			is_client: true,
-			expect_continuation: false,
-			close_state: None
-		})
+	pub fn server(stream: BufReader<HttpStream>, options: &WebSocketOptions) -> Self {
+		Self::_new(stream, options, false)
 	}
 
 	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
@@ -456,10 +509,13 @@ impl WebSocket {
 	}
 
 	fn shutdown(&mut self, how: Shutdown) {
-		match self.close_state {
-			None => self.close_state = Some(how),
+		/* this is the only shared value when split. prevent caching */
+		let this = MutPtr::from(self).as_mut();
+
+		match this.close_state {
+			None => this.close_state = Some(how),
 			Some(cur) if cur == how => (),
-			Some(_) => self.close_state = Some(Shutdown::Both)
+			Some(_) => this.close_state = Some(Shutdown::Both)
 		}
 	}
 
@@ -513,9 +569,69 @@ impl WebSocket {
 	pub fn split(&mut self) -> (Reader<'_>, Writer<'_>) {
 		let mut this = MutPtr::from(self);
 
-		(
-			Reader { web_socket: this.as_mut() },
-			Writer { web_socket: this.as_mut() }
+		(this.as_mut().reader(), this.as_mut().writer())
+	}
+}
+
+pub struct WebSocketServer {
+	listener: TcpListener,
+	options: WebSocketOptions
+}
+
+pub struct WebSocketHandle {
+	stream: HttpStream,
+	options: WebSocketOptions
+}
+
+#[async_fn]
+impl WebSocketHandle {
+	async fn accept_websocket(self) -> Result<WebSocket> {
+		struct WSServer {}
+
+		let server = WSServer {};
+		let stream = match select(
+			handle_upgrade(self.stream, &server),
+			sleep(self.options.handshake_timeout)
 		)
+		.await
+		{
+			Select::First(stream, _) => stream?,
+			Select::Second(..) => {
+				return Err(Error::new(
+					ErrorKind::TimedOut,
+					"Client handshake timed out"
+				))
+			}
+		};
+
+		Ok(WebSocket::server(stream, &self.options))
+	}
+}
+
+impl Task for WebSocketHandle {
+	type Output = Result<WebSocket>;
+
+	fn run(self, mut context: Handle<Context>) -> Self::Output {
+		context.run(self.accept_websocket())
+	}
+}
+
+#[async_fn]
+impl WebSocketServer {
+	pub async fn bind<A: ToSocketAddrs>(addrs: A, options: WebSocketOptions) -> Result<Self> {
+		let listener = Tcp::bind(addrs).await?;
+
+		Ok(Self { listener, options })
+	}
+
+	pub async fn accept(&self) -> Result<WebSocketHandle> {
+		let (socket, _) = self.listener.accept().await?;
+		let stream = HttpStream::new(socket);
+
+		Ok(WebSocketHandle { stream, options: self.options.clone() })
+	}
+
+	pub async fn local_addr(&self) -> Result<SocketAddr> {
+		self.listener.local_addr().await
 	}
 }

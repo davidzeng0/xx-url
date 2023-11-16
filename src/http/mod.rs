@@ -17,7 +17,7 @@ pub enum Version {
 }
 
 impl Version {
-	fn as_str(&self) -> &'static str {
+	pub fn as_str(&self) -> &'static str {
 		match self {
 			Version::Http09 => "HTTP/0.9",
 			Version::Http10 => "HTTP/1.0",

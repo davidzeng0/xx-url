@@ -1,21 +1,8 @@
 use std::{collections::HashMap, net::IpAddr, str::FromStr};
 
-use hickory_proto::{
-	op::Query,
-	rr::{Name, RData, Record, RecordType}
-};
-use xx_core::{
-	async_std::{io::*, AsyncIteratorExt},
-	error::*,
-	warn
-};
-use xx_pulse::*;
+use xx_core::warn;
 
-use super::{
-	lookup::{Lookup, LookupResults},
-	result::DnsError
-};
-use crate::env::hosts_path;
+use super::*;
 
 struct Results {
 	a: Option<LookupResults>,
@@ -109,7 +96,7 @@ impl Hosts {
 impl Lookup for Hosts {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let results = match self.name.get(query.name()) {
-			None => return Err(Error::other(DnsError::NoData)),
+			None => return Err(Error::map_as_other(DnsError::NoData)),
 			Some(results) => results
 		};
 
@@ -120,7 +107,7 @@ impl Lookup for Hosts {
 		};
 
 		match results {
-			None => Err(Error::other(DnsError::NoData)),
+			None => Err(Error::map_as_other(DnsError::NoData)),
 			Some(results) => Ok(results)
 		}
 	}

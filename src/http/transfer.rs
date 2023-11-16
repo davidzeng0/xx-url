@@ -17,6 +17,7 @@ use crate::{net::connection::*, tls::connection::TlsConn};
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */
 const REDIRECT_REUSE_THRESHOLD: u64 = 4 * 1024;
+pub(crate) const DEFAULT_MAXIMUM_HEADER_SIZE: u32 = 128 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct Options {
@@ -48,7 +49,7 @@ impl Options {
 			min_version: Version::Http10,
 			max_version: Version::Http11,
 			follow_redirect: 5,
-			maximum_header_size: 128 * 1024
+			maximum_header_size: DEFAULT_MAXIMUM_HEADER_SIZE
 		}
 	}
 }
@@ -213,7 +214,7 @@ pub async fn send_request(
 }
 
 #[async_fn]
-async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> {
+pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> {
 	let mut offset = 0;
 
 	loop {
@@ -260,10 +261,7 @@ async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> 
 	Ok((line, offset))
 }
 
-fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
-	let mut split = line.split(" ");
-	let version = split.next()?;
-
+pub fn parse_version(version: &str) -> Option<Version> {
 	if version.len() != "HTTP/0.0".len() || version.as_bytes()[6] != b'.' {
 		return None;
 	}
@@ -271,10 +269,14 @@ fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
 	let major = (version.as_bytes()[5] as char).to_digit(10)?;
 	let minor = (version.as_bytes()[7] as char).to_digit(10)?;
 
-	Some((
-		Version::from_u32(major * 10 + minor)?,
-		StatusCode::from_str(split.next()?).ok()?
-	))
+	Version::from_u32(major * 10 + minor)
+}
+
+fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
+	let mut split = line.split(' ');
+	let version = parse_version(split.next()?)?;
+
+	Some((version, StatusCode::from_str(split.next()?).ok()?))
 }
 
 #[async_fn]
@@ -355,7 +357,8 @@ pub async fn parse_response(
 			));
 		}
 
-		/* unchecked because if it's binary, that's still valid for HTTP/0.9 */
+		/* unchecked because if it's binary, that's still valid for HTTP/0.9. we only
+		 * care if it matches the prefix */
 		let actual = unsafe { from_utf8_unchecked(&reader.buffer()[0..prefix.len()]) };
 
 		prefix.eq_ignore_ascii_case(actual)

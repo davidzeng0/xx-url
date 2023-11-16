@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use crypto::{digest::Digest, sha1::Sha1};
+use xx_core::error::*;
 
 use super::consts::WEB_SOCKET_GUID;
 
@@ -10,6 +11,18 @@ pub struct Key {
 impl Key {
 	pub fn new() -> Self {
 		Self { data: rand::random() }
+	}
+
+	pub fn from(val: &str) -> Result<Self> {
+		let mut data = [0u8; 18];
+
+		let decoded_len = STANDARD.decode_slice(val.as_bytes(), &mut data);
+
+		if !decoded_len.is_ok_and(|len| len == 16) {
+			return Err(Error::new(ErrorKind::InvalidData, "Invalid WebSocket key"));
+		}
+
+		Ok(Self { data: data[..16].try_into().unwrap() })
 	}
 
 	pub fn encode(&self, out: &mut [u8; 24]) {

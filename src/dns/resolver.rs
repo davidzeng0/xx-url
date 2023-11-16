@@ -4,15 +4,9 @@ use std::{
 	time::Instant
 };
 
-use hickory_proto::{op::Query, rr::*};
-use xx_core::{debug, error::*, trace};
-use xx_pulse::*;
+use xx_core::{debug, trace};
 
-use super::{
-	config::Config,
-	hosts::Hosts,
-	lookup::{Lookup, LookupExt}
-};
+use super::*;
 
 pub struct Resolver {
 	services: Vec<Box<dyn Lookup>>
@@ -73,7 +67,7 @@ impl Resolver {
 		this.services.push(Box::new(hosts));
 
 		for nameserver in config.name_servers {
-			trace!(target: &this, "++ Name Server {}", nameserver.to_string());
+			trace!(target: &this, "++ {:?}", nameserver);
 
 			this.services.push(Box::new(nameserver));
 		}
@@ -128,7 +122,7 @@ impl Resolver {
 			}
 		}
 
-		let name = Name::from_str(&name.to_lowercase()).map_err(Error::other)?;
+		let name = Name::from_str(&name.to_lowercase()).map_err(Error::map_as_other)?;
 		let now = Instant::now();
 
 		debug!(target: self, "<< Lookup {}", name);

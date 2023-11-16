@@ -1,11 +1,8 @@
 use std::time::Duration;
 
 use resolv_conf::Config as ResolveConfig;
-use xx_core::{async_std::io::*, error::*};
-use xx_pulse::*;
 
-use super::name_server::NameServer;
-use crate::env::resolver_conf_path;
+use super::*;
 
 pub struct Config {
 	pub name_servers: Vec<NameServer>,
@@ -24,7 +21,7 @@ impl Config {
 			.read_to_end(&mut data)
 			.await?;
 
-		let config = ResolveConfig::parse(data).map_err(Error::invalid_data_error)?;
+		let config = ResolveConfig::parse(data).map_err(Error::map_as_invalid_data)?;
 
 		let mut name_servers = Vec::new();
 

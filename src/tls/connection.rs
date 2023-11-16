@@ -38,8 +38,22 @@ impl From<connection::ConnectStats> for ConnectStats {
 }
 
 struct AsyncConnection {
-	context: Handle<Context>,
+	read_context: Handle<Context>,
+	write_context: Handle<Context>,
 	connection: Connection
+}
+
+impl AsyncConnection {
+	fn new(connection: Connection) -> Self {
+		/* Safety: context is assigned before read/write operations */
+		unsafe {
+			Self {
+				read_context: Handle::null(),
+				write_context: Handle::null(),
+				connection
+			}
+		}
+	}
 }
 
 impl Deref for AsyncConnection {
@@ -58,13 +72,13 @@ impl DerefMut for AsyncConnection {
 
 impl io::Read for AsyncConnection {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		self.context
+		self.read_context
 			.run(self.connection.read(buf))
 			.map_err(|err| err.into())
 	}
 
 	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-		self.context
+		self.read_context
 			.run(self.connection.read_vectored(bufs))
 			.map_err(|err| err.into())
 	}
@@ -76,7 +90,7 @@ impl io::Write for AsyncConnection {
 	 * due to polling
 	 */
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		self.context
+		self.write_context
 			.run(self.connection.send(buf, MessageFlag::DontWait as u32))
 			.map_err(|err| err.into())
 	}
@@ -86,7 +100,7 @@ impl io::Write for AsyncConnection {
 	}
 
 	fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-		self.context
+		self.write_context
 			.run(
 				self.connection
 					.send_vectored(bufs, MessageFlag::DontWait as u32)
@@ -98,15 +112,6 @@ impl io::Write for AsyncConnection {
 pub struct TlsConn {
 	inner: AsyncConnection,
 	tls: ClientConnection
-}
-
-fn make_client(options: &ConnectOptions, config: Arc<ClientConfig>) -> Result<ClientConnection> {
-	let server_name = options
-		.host()
-		.try_into()
-		.map_err(Error::invalid_data_error)?;
-
-	ClientConnection::new(config, server_name).map_err(Error::invalid_data_error)
 }
 
 macro_rules! alias_func {
@@ -126,7 +131,8 @@ impl TlsConn {
 		let now = Instant::now();
 		let mut eof = false;
 
-		self.inner.context = get_context().await;
+		self.inner.read_context = get_context().await;
+		self.inner.write_context = get_context().await;
 
 		loop {
 			let handshaking = self.tls.is_handshaking();
@@ -160,7 +166,7 @@ impl TlsConn {
 				} else if let Err(err) = self.tls.process_new_packets() {
 					let _ = self.tls.write_tls(&mut self.inner);
 
-					return Err(Error::invalid_data_error(err));
+					return Err(Error::map_as_invalid_input(err));
 				}
 			}
 
@@ -213,15 +219,16 @@ impl TlsConn {
 	pub async fn connect_stats_config(
 		options: &ConnectOptions, config: Arc<ClientConfig>
 	) -> Result<(TlsConn, ConnectStats)> {
-		let tls = make_client(options, config)?;
+		let server_name = options
+			.host()
+			.try_into()
+			.map_err(Error::map_as_invalid_input)?;
+		let tls =
+			ClientConnection::new(config, server_name).map_err(Error::map_as_invalid_input)?;
 
 		let (connection, stats) = Connection::connect_stats(options).await?;
 
-		let mut connection = TlsConn {
-			/* context is assigned before read/write operations */
-			inner: AsyncConnection { context: unsafe { Handle::null() }, connection },
-			tls
-		};
+		let mut connection = TlsConn { inner: AsyncConnection::new(connection), tls };
 
 		let mut stats = stats.into();
 
@@ -255,7 +262,7 @@ impl TlsConn {
 		}
 
 		loop {
-			self.inner.context = get_context().await;
+			self.inner.read_context = get_context().await;
 
 			if self.tls.read_tls(&mut self.inner)? == 0 {
 				return Ok(0);
@@ -264,7 +271,7 @@ impl TlsConn {
 			let state = self
 				.tls
 				.process_new_packets()
-				.map_err(Error::invalid_data_error)?;
+				.map_err(Error::map_as_invalid_data)?;
 
 			if state.plaintext_bytes_to_read() == 0 {
 				check_interrupt().await?;
@@ -289,7 +296,7 @@ impl TlsConn {
 	async fn tls_write(
 		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
 	) -> Result<usize> {
-		self.inner.context = get_context().await;
+		self.inner.write_context = get_context().await;
 
 		loop {
 			let wrote = write(&mut self.tls)?;

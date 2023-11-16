@@ -13,25 +13,41 @@ use crate::http::transfer::Request;
 
 const DEFAULT_MAX_MESSAGE_LENGTH: u64 = 128 * 1024 * 1024;
 
-pub(crate) struct Options {
+#[derive(Clone, Copy)]
+pub struct WebSocketOptions {
 	pub(crate) handshake_timeout: Duration,
 	pub(crate) max_message_length: u64,
 	pub(crate) close_timeout: Duration
 }
 
-impl Options {
-	pub(crate) fn new() -> Self {
+impl WebSocketOptions {
+	pub fn new() -> Self {
 		Self {
 			handshake_timeout: Duration::from_secs(60),
 			max_message_length: DEFAULT_MAX_MESSAGE_LENGTH,
 			close_timeout: Duration::from_secs(30)
 		}
 	}
+
+	pub fn set_handshake_timeout(&mut self, timeout: Duration) -> &mut Self {
+		self.handshake_timeout = timeout;
+		self
+	}
+
+	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
+		self.max_message_length = max;
+		self
+	}
+
+	pub fn set_close_timeout(&mut self, timeout: Duration) -> &mut Self {
+		self.close_timeout = timeout;
+		self
+	}
 }
 
 pub struct WsRequest {
 	pub(crate) inner: Request,
-	pub(crate) options: Options
+	pub(crate) options: WebSocketOptions
 }
 
 #[async_fn]
@@ -40,13 +56,18 @@ impl WsRequest {
 		WebSocket::new(self).await
 	}
 
+	pub fn set_handshake_timeout(&mut self, timeout: Duration) -> &mut Self {
+		self.options.set_handshake_timeout(timeout);
+		self
+	}
+
 	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
-		self.options.max_message_length = max;
+		self.options.set_max_message_length(max);
 		self
 	}
 
 	pub fn set_close_timeout(&mut self, timeout: Duration) -> &mut Self {
-		self.options.close_timeout = timeout;
+		self.options.set_close_timeout(timeout);
 		self
 	}
 }
@@ -73,9 +94,9 @@ impl DerefMut for WsRequest {
 	}
 }
 
-pub fn get(url: &str) -> Result<WsRequest> {
+pub fn open(url: &str) -> Result<WsRequest> {
 	let mut request = Request::new(
-		Url::parse(url).map_err(Error::invalid_input_error)?,
+		Url::parse(url).map_err(Error::map_as_invalid_input)?,
 		Method::GET
 	);
 
@@ -90,5 +111,5 @@ pub fn get(url: &str) -> Result<WsRequest> {
 		}
 	}
 
-	Ok(WsRequest { inner: request, options: Options::new() })
+	Ok(WsRequest { inner: request, options: WebSocketOptions::new() })
 }

@@ -1,9 +1,6 @@
-use hickory_proto::{
-	error::ProtoError,
-	op::{Query, ResponseCode},
-	rr::{rdata::SOA, Record}
-};
 use thiserror::Error;
+
+use super::*;
 
 #[derive(Debug, Error)]
 pub enum DnsError {

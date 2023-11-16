@@ -22,6 +22,13 @@ impl Inner for TlsConn {
 	}
 }
 
+#[async_trait_impl]
+impl Inner for StreamSocket {
+	async fn shutdown(&mut self, how: Shutdown) -> Result<()> {
+		StreamSocket::shutdown(self, how).await
+	}
+}
+
 pub struct HttpStream {
 	inner: Box<dyn Inner>
 }

@@ -1,8 +1,6 @@
 use std::time::Instant;
 
-use hickory_proto::{op::Query, rr::Record};
-use xx_core::error::*;
-use xx_pulse::*;
+use super::*;
 
 #[derive(Clone)]
 pub struct LookupResults {

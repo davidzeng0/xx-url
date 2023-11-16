@@ -1,6 +1,12 @@
 pub mod web_socket;
-use std::{fmt, mem::MaybeUninit};
+use std::{
+	fmt,
+	mem::{size_of, transmute, MaybeUninit},
+	slice,
+	str::from_utf8
+};
 
+use num_derive::FromPrimitive;
 pub use web_socket::*;
 pub mod request;
 pub use request::*;
@@ -11,6 +17,24 @@ mod consts;
 mod handshake;
 mod transfer;
 mod wire;
+
+#[repr(u16)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]
+pub enum CloseCode {
+	Normal              = 1000,
+	GoingAway           = 1001,
+	ProtocolError       = 1002,
+	UnsupportedDataKind = 1003,
+	Reserved            = 1004,
+	NoStatusCode        = 1005,
+	NoClose             = 1006,
+	InvalidMessageData  = 1007,
+	PolicyViolation     = 1008,
+	MessageTooLong      = 1009,
+	ExtensionsExpected  = 1010,
+	InternalServerError = 1011,
+	TlsHandshakeFailure = 1015
+}
 
 pub struct BorrowedFrame<'a> {
 	op: Op,
@@ -76,36 +100,53 @@ impl<'a> From<&'a Frame> for BorrowedFrame<'a> {
 	}
 }
 
+impl<'a> From<&'a str> for BorrowedFrame<'a> {
+	fn from(value: &'a str) -> Self {
+		Frame::text(value)
+	}
+}
+
+impl<'a> From<&'a [u8]> for BorrowedFrame<'a> {
+	fn from(value: &'a [u8]) -> Self {
+		Frame::binary(value)
+	}
+}
+
 pub struct ControlFrame {
-	data: [u8; 0x7d],
+	data: [MaybeUninit<u8>; Self::MAX_LENGTH],
 	offset: u8,
 	length: u8
 }
 
 impl ControlFrame {
-	fn new() -> Self {
+	pub const MAX_LENGTH: usize = 0x7d;
+
+	pub fn new() -> Self {
 		Self {
-			#[allow(invalid_value)]
-			data: unsafe { MaybeUninit::uninit().assume_init() },
+			data: [MaybeUninit::uninit(); Self::MAX_LENGTH],
 			offset: 0,
 			length: 0
 		}
 	}
 
 	pub fn data(&self) -> &[u8] {
-		&self.data[self.offset as usize..self.length as usize]
+		unsafe { transmute(&self.data[self.offset as usize..self.length as usize]) }
+	}
+
+	pub fn data_mut(&mut self) -> &mut [u8] {
+		unsafe { transmute(&mut self.data[self.offset as usize..self.length as usize]) }
+	}
+}
+
+impl fmt::Debug for ControlFrame {
+	fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+		fmt.debug_tuple("ControlFrame").field(&self.data()).finish()
 	}
 }
 
 impl AsRef<[u8]> for ControlFrame {
 	fn as_ref(&self) -> &[u8] {
 		self.data()
-	}
-}
-
-impl fmt::Debug for ControlFrame {
-	fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.as_ref().fmt(fmt)
 	}
 }
 
@@ -116,4 +157,57 @@ pub enum Frame {
 	Close(u16, ControlFrame),
 	Text(String),
 	Binary(Vec<u8>)
+}
+
+impl fmt::Display for Frame {
+	fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Frame::Ping(frame) => fmt.debug_tuple("Ping").field(&frame.data()).finish(),
+			Frame::Pong(frame) => fmt.debug_tuple("Pong").field(&frame.data()).finish(),
+			Frame::Close(code, frame) => {
+				let mut close = fmt.debug_struct("Close");
+
+				close.field("code", code);
+
+				match from_utf8(frame.data()) {
+					Ok(msg) => close.field("message", &msg),
+					Err(_) => close.field("message", &frame.data())
+				};
+
+				close.finish()
+			}
+
+			Frame::Text(data) => fmt.debug_tuple("Text").field(&data).finish(),
+			Frame::Binary(data) => fmt.debug_tuple("Text").field(&data).finish()
+		}
+	}
+}
+
+pub fn mask(data: &mut [u8], mask: u32) {
+	let vec = unsafe {
+		slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u32, data.len() / size_of::<u32>())
+	};
+
+	for val in vec.iter_mut() {
+		*val ^= mask.to_be();
+	}
+
+	let mut offset = vec.len() * size_of::<u32>();
+
+	if offset < data.len() {
+		data[offset] ^= (mask >> 24) as u8;
+		offset += 1;
+	}
+
+	if offset < data.len() {
+		data[offset] ^= (mask >> 16) as u8;
+		offset += 1;
+	}
+
+	if offset < data.len() {
+		data[offset] ^= (mask >> 8) as u8;
+		offset += 1;
+	}
+
+	debug_assert_eq!(offset, data.len());
 }

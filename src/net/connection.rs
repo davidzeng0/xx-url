@@ -21,7 +21,7 @@ use xx_core::{
 use xx_pulse::{poll as async_poll, *};
 
 use crate::{
-	dns::resolver::{LookupIp, Resolver},
+	dns::{LookupIp, Resolver},
 	env::get_resolver
 };
 
@@ -196,12 +196,12 @@ impl Connection {
 		let v6 = addrs.v6().iter().map(|addr| IpAddr::V6(addr.clone()));
 
 		match options.strategy {
-			IpStrategy::Default | IpStrategy::Ipv4Only => {
-				Self::connect_addrs(v4, options, stats).await
+			IpStrategy::Default | IpStrategy::PreferIpv4 => {
+				Self::connect_addrs(v4.chain(v6), options, stats).await
 			}
 
+			IpStrategy::Ipv4Only => Self::connect_addrs(v4, options, stats).await,
 			IpStrategy::Ipv6Only => Self::connect_addrs(v6, options, stats).await,
-			IpStrategy::PreferIpv4 => Self::connect_addrs(v4.chain(v6), options, stats).await,
 
 			IpStrategy::PreferIpv6 => Self::connect_addrs(v6.chain(v4), options, stats).await
 		}

@@ -5,10 +5,10 @@ use std::{
 };
 
 use rustls::ClientConfig;
-use xx_core::{debug, pointer::ConstPtr};
+use xx_core::{debug, pointer::Ptr};
 use xx_pulse::*;
 
-use crate::{dns::resolver::Resolver, tls::certs::load_system_certs};
+use crate::{dns::Resolver, tls::certs::load_system_certs};
 
 struct GlobalData {
 	dns_resolver: Arc<Resolver>,
@@ -64,12 +64,12 @@ fn get_global_data() -> &'static GlobalData {
 	let mut data = unsafe { &GLOBAL_DATA }.lock().unwrap();
 
 	if let Some(config) = &*data {
-		return ConstPtr::from(config).as_ref();
+		return Ptr::from(config).as_ref();
 	}
 
 	*data = Some(create_global_data());
 
-	ConstPtr::from((&*data).as_ref().unwrap()).as_ref()
+	Ptr::from((&*data).as_ref().unwrap()).as_ref()
 }
 
 fn create_thread_local_data() -> ThreadLocalData {
@@ -85,12 +85,12 @@ fn get_data() -> &'static ThreadLocalData {
 	THREAD_LOCAL_DATA
 		.with(|data| {
 			if let Some(data) = &*data.borrow() {
-				return ConstPtr::from(data);
+				return Ptr::from(data);
 			}
 
 			*data.borrow_mut() = Some(create_thread_local_data());
 
-			ConstPtr::from(data.borrow().as_ref().unwrap())
+			data.borrow().as_ref().unwrap().into()
 		})
 		.as_ref()
 }
