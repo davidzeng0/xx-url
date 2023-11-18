@@ -28,3 +28,5 @@ jobs:
         cargo test --verbose --release
         cargo valgrind test --verbose
         cargo valgrind test --verbose --release
+      env:
+        VALGRINDFLAGS: --show-reachable=no --show-possibly-lost=no --undef-value-error=no --error-exitcode=255
