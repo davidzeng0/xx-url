@@ -1,7 +1,6 @@
 use std::{
 	io::{IoSlice, IoSliceMut},
 	net::{IpAddr, SocketAddr},
-	os::fd::AsRawFd,
 	sync::Arc,
 	time::{Duration, Instant}
 };
@@ -262,21 +261,14 @@ impl Connection {
 
 		/* sync polling because we don't care about waiting, and async polling isn't
 		 * any faster */
-		let mut fds = [PollFd {
-			fd: self.inner.fd().as_raw_fd(),
-			events: flags.bits() as u16,
-			returned_events: 0
-		}];
+		let mut fds = [PollFd::new(self.inner.fd(), flags)];
 
 		/* we shouldn't need to handle EINTR here because the timeout is 0 */
 		if poll(&mut fds, 0)? == 0 {
 			/* no events */
 			Ok(false)
 		} else {
-			let returned_flags =
-				unsafe { BitFlags::from_bits_unchecked(fds[0].returned_events as u32) };
-
-			Ok(returned_flags.intersects(flags))
+			Ok(fds[0].returned_events().intersects(flags))
 		}
 	}
 
