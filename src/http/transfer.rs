@@ -8,7 +8,12 @@ use http::{Method, StatusCode};
 use memchr::memchr;
 use num_traits::FromPrimitive;
 use url::{Position, Url};
-use xx_core::{async_std::io::*, debug, error::*, trace, warn};
+use xx_core::{
+	async_std::io::{typed::WriteTyped, *},
+	debug,
+	error::*,
+	trace, warn
+};
 use xx_pulse::*;
 
 use super::{stream::HttpStream, *};
@@ -179,7 +184,6 @@ pub async fn send_request(
 		};
 	}
 
-	let mut writer = TypedWriter::new(writer.as_ref());
 	let path = &url[Position::BeforePath..Position::AfterQuery];
 
 	match version {
@@ -430,7 +434,7 @@ pub async fn transfer(
 		let mut stats = stats.unwrap_or_else(|| Stats::default());
 
 		let (stream, mut buf, _) = {
-			let mut writer = BufWriter::from_parts(conn.stream, conn.buf);
+			let mut writer = BufWriter::from_parts(conn.stream, conn.buf, 0);
 			let stall = Instant::now();
 
 			send_request(&mut writer, request, url, Version::Http11).await?;

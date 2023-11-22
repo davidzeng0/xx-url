@@ -1,6 +1,5 @@
 use std::{
 	io::{self, IoSlice, IoSliceMut},
-	ops::{Deref, DerefMut},
 	sync::Arc,
 	time::{Duration, Instant}
 };
@@ -16,7 +15,8 @@ use xx_core::{
 		poll::PollFlag,
 		socket::{MessageFlag, Shutdown}
 	},
-	task::Handle
+	task::Handle,
+	trace, wrapper_functions
 };
 use xx_pulse::*;
 
@@ -38,9 +38,9 @@ impl From<connection::ConnectStats> for ConnectStats {
 }
 
 struct AsyncConnection {
+	connection: Connection,
 	read_context: Handle<Context>,
-	write_context: Handle<Context>,
-	connection: Connection
+	write_context: Handle<Context>
 }
 
 impl AsyncConnection {
@@ -53,20 +53,6 @@ impl AsyncConnection {
 				connection
 			}
 		}
-	}
-}
-
-impl Deref for AsyncConnection {
-	type Target = Connection;
-
-	fn deref(&self) -> &Connection {
-		&self.connection
-	}
-}
-
-impl DerefMut for AsyncConnection {
-	fn deref_mut(&mut self) -> &mut Connection {
-		&mut self.connection
 	}
 }
 
@@ -114,18 +100,22 @@ pub struct TlsConn {
 	tls: ClientConnection
 }
 
-macro_rules! alias_func {
-	($func: ident ($self: ident: $self_type: ty $(, $arg: ident: $type: ty)*) -> $return_type: ty) => {
-		#[async_fn]
-		pub async fn $func($self: $self_type $(, $arg: $type)*) -> $return_type {
-			$self.inner.$func($($arg),*).await
-		}
-	}
-}
-
 #[async_fn]
 impl TlsConn {
-	alias_func!(shutdown(self: &Self, how: Shutdown) -> Result<()>);
+	wrapper_functions! {
+		inner = self.inner.connection;
+
+		pub fn has_peer_hungup(&self) -> Result<bool>;
+
+		#[async_fn]
+		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
+
+		#[async_fn]
+		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
+
+		#[async_fn]
+		pub async fn close(self) -> Result<()>;
+	}
 
 	async fn tls_connect(&mut self, stats: &mut ConnectStats) -> Result<()> {
 		let now = Instant::now();
@@ -148,7 +138,7 @@ impl TlsConn {
 				flags |= PollFlag::In;
 			}
 
-			let flags = self.inner.poll(flags).await?;
+			let flags = self.poll(flags).await?;
 
 			if flags.intersects(PollFlag::Out) {
 				if self.tls.write_tls(&mut self.inner)? == 0 {
@@ -193,20 +183,18 @@ impl TlsConn {
 		if let Some((_, cert)) = self
 			.tls
 			.peer_certificates()
-			.map(|certs| certs.first())
-			.flatten()
-			.map(|cert| X509Certificate::from_der(&cert.0).ok())
-			.flatten()
+			.and_then(|certs| certs.first())
+			.and_then(|cert| X509Certificate::from_der(&cert.0).ok())
 		{
-			debug!(target: self, "== Certificate: ");
-			debug!(target: self, "==     Subject: {}", cert.subject());
-			debug!(target: self, "==     Issuer : {}", cert.issuer());
-			debug!(target: self, "==     Start  : {}", cert.validity().not_before);
-			debug!(target: self, "==     Expire : {}", cert.validity().not_after);
+			trace!(target: self, "== Certificate: ");
+			trace!(target: self, "==     Subject: {}", cert.subject());
+			trace!(target: self, "==     Issuer : {}", cert.issuer());
+			trace!(target: self, "==     Start  : {}", cert.validity().not_before);
+			trace!(target: self, "==     Expire : {}", cert.validity().not_after);
 
 			if let Ok(Some(alt)) = cert.subject_alternative_name() {
 				for name in &alt.value.general_names {
-					debug!(target: self, "==     Alt    : {}", name);
+					trace!(target: self, "==     Alt    : {}", name);
 				}
 			}
 		}
@@ -326,14 +314,6 @@ impl TlsConn {
 		self.tls_write(|tls| io::Write::write_vectored(&mut tls.writer(), bufs))
 			.await
 	}
-
-	pub fn has_peer_hungup(&mut self) -> Result<bool> {
-		self.inner.has_peer_hungup()
-	}
-
-	pub async fn close(self) -> Result<()> {
-		self.inner.connection.close().await
-	}
 }
 
 #[async_trait_impl]
@@ -365,3 +345,5 @@ impl Write for TlsConn {
 		self.send_vectored(bufs).await
 	}
 }
+
+impl Split for TlsConn {}

@@ -15,9 +15,9 @@ use xx_core::{
 		poll::{poll, PollFd, PollFlag},
 		socket::{Shutdown, SocketType}
 	},
-	read_wrapper, write_wrapper
+	read_wrapper, wrapper_functions, write_wrapper
 };
-use xx_pulse::{poll as async_poll, *};
+use xx_pulse::*;
 
 use crate::{
 	dns::{LookupIp, Resolver},
@@ -121,29 +121,33 @@ pub struct Connection {
 	inner: Socket
 }
 
-macro_rules! alias_func {
-	($func: ident ($self: ident: $self_type: ty $(, $arg: ident: $type: ty)*) -> $return_type: ty) => {
-		#[async_fn]
-		pub async fn $func($self: $self_type $(, $arg: $type)*) -> $return_type {
-			$self.inner.$func($($arg),*).await
-		}
-	}
-}
-
+#[async_fn]
 impl Connection {
-	alias_func!(shutdown(self: &Self, how: Shutdown) -> Result<()>);
+	wrapper_functions! {
+		inner = self.inner;
 
-	alias_func!(close(self: Self) -> Result<()>);
+		#[async_fn]
+		pub async fn recv(&self, buf: &mut [u8], flags: u32) -> Result<usize>;
 
-	alias_func!(recv(self: &Self, buf: &mut [u8], flags: u32) -> Result<usize>);
+		#[async_fn]
+		pub async fn send(&self, buf: &[u8], flags: u32) -> Result<usize>;
 
-	alias_func!(send(self: &Self, buf: &[u8], flags: u32) -> Result<usize>);
+		#[async_fn]
+		pub async fn recv_vectored(&self, bufs: &mut [IoSliceMut<'_>], flags: u32) -> Result<usize>;
 
-	alias_func!(recv_vectored(self: &Self, bufs: &mut [IoSliceMut<'_>], flags: u32) -> Result<usize>);
+		#[async_fn]
+		pub async fn send_vectored(&self, bufs: &[IoSlice<'_>], flags: u32) -> Result<usize>;
 
-	alias_func!(send_vectored(self: &Self, bufs: &[IoSlice<'_>], flags: u32) -> Result<usize>);
+		#[async_fn]
+		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
-	#[async_fn]
+		#[async_fn]
+		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
+
+		#[async_fn]
+		pub async fn close(self) -> Result<()>;
+	}
+
 	async fn connect_addrs<A: Iterator<Item = IpAddr>>(
 		addrs: A, options: &ConnectOptions, stats: &mut ConnectStats
 	) -> Result<Connection> {
@@ -187,7 +191,6 @@ impl Connection {
 		Err(error.unwrap())
 	}
 
-	#[async_fn]
 	async fn connect_to(
 		options: &ConnectOptions, addrs: &LookupIp, stats: &mut ConnectStats
 	) -> Result<Connection> {
@@ -206,7 +209,6 @@ impl Connection {
 		}
 	}
 
-	#[async_fn]
 	pub async fn connect_stats(options: &ConnectOptions) -> Result<(Connection, ConnectStats)> {
 		let mut stats = ConnectStats::default();
 
@@ -248,12 +250,11 @@ impl Connection {
 		Ok((connection, stats))
 	}
 
-	#[async_fn]
 	pub async fn connect(options: &ConnectOptions) -> Result<Connection> {
 		Ok(Self::connect_stats(options).await?.0)
 	}
 
-	pub fn has_peer_hungup(&mut self) -> Result<bool> {
+	pub fn has_peer_hungup(&self) -> Result<bool> {
 		/* error and hangup are ignored in the input,
 		 * we only use it to check for intersection
 		 */
@@ -271,13 +272,6 @@ impl Connection {
 			Ok(fds[0].returned_events().intersects(flags))
 		}
 	}
-
-	#[async_fn]
-	pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
-		let bits = async_poll(self.inner.fd(), flags.bits()).await?;
-
-		Ok(unsafe { BitFlags::from_bits_unchecked(bits) })
-	}
 }
 
 impl Read for Connection {
@@ -293,3 +287,5 @@ impl Write for Connection {
 		mut inner = inner;
 	}
 }
+
+impl Split for Connection {}

@@ -4,12 +4,16 @@ use std::{
 	time::Duration
 };
 
+use enumflags2::make_bitflags;
 use num_traits::FromPrimitive;
 use xx_core::{
-	async_std::{io::*, AsyncIterator},
+	async_std::{
+		io::{typed::BufReadTyped, *},
+		AsyncIterator
+	},
 	debug,
 	error::*,
-	os::socket::Shutdown,
+	os::{poll::PollFlag, socket::Shutdown},
 	pointer::MutPtr,
 	read_into,
 	task::Handle
@@ -32,7 +36,7 @@ pub struct FrameHeader {
 }
 
 #[async_fn]
-async fn decode_length(len: u8, reader: &mut TypedReader<impl BufRead>) -> Result<u64> {
+async fn decode_length(len: u8, reader: &mut impl BufRead) -> Result<u64> {
 	if len < 0x7e {
 		Ok(len as u64)
 	} else if len == 0x7e {
@@ -61,14 +65,13 @@ fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 #[async_fn]
 impl FrameHeader {
 	async fn read(reader: &mut impl BufRead) -> Result<Option<Self>> {
-		let mut reader = TypedReader::new(reader.as_ref());
 		let flags: [u8; 2] = match reader.read_type().await? {
 			Some(flags) => flags,
 			None => return Ok(None)
 		};
 
 		let wire = FrameHeaderPacket::new(&flags).unwrap();
-		let len = decode_length(wire.get_len(), &mut reader).await?;
+		let len = decode_length(wire.get_len(), reader).await?;
 		let mask = if wire.get_masked() != 0 {
 			Some(reader.read_u32_be_or_err().await?)
 		} else {
@@ -269,9 +272,11 @@ impl<'a> Frames<'a> {
 					let mut code = CloseCode::NoStatusCode as u16;
 
 					if control.data().len() >= 2 {
-						code = u16::from_be_bytes([control.data()[0], control.data()[1]]);
+						code = u16::from_be_bytes(control.data()[0..2].try_into().unwrap());
 						control.offset = 2;
 					}
+
+					self.reader.web_socket.maybe_close().await?;
 
 					Frame::Close(code, control)
 				}
@@ -286,14 +291,11 @@ impl<'a> Frames<'a> {
 
 			let (_, buf) = current_message.get_or_insert_with(|| (frame.op, Vec::new()));
 
-			let remaining = self
-				.reader
+			self.reader
 				.web_socket
 				.max_message_length
-				.checked_sub(buf.len() as u64);
-			let remaining = remaining.map(|len| len.checked_sub(frame.len)).flatten();
-
-			remaining
+				.checked_sub(buf.len() as u64)
+				.and_then(|len| len.checked_sub(frame.len))
 				.ok_or_else(|| Error::new(ErrorKind::Other, "Maximum message length exceeded"))?;
 			buf.reserve(frame.len as usize);
 
@@ -403,40 +405,38 @@ impl<'a> Writer<'a> {
 		}
 
 		let mut bytes = [0u8; 16];
-		let mut writer = Cursor::new(&mut bytes[..]);
+		let header = {
+			let mut writer = Cursor::new(&mut bytes[..]);
 
-		header.write(&mut writer).unwrap();
+			header.write(&mut writer).unwrap();
 
-		if header.op == Op::Close {
-			writer.write_all(&frame.close_code.to_be_bytes()).unwrap();
+			if header.op == Op::Close {
+				writer.write_all(&frame.close_code.to_be_bytes()).unwrap();
+			}
 
-			self.web_socket.shutdown(Shutdown::Write);
-		}
+			let len = writer.position() as usize;
 
-		let header_len = writer.position() as usize;
+			&bytes[0..len]
+		};
 
-		self.web_socket
-			.write_all(&mut [&bytes[0..header_len], frame.payload])
+		let data = &mut [IoSlice::new(header), IoSlice::new(frame.payload)];
+		let wrote = self
+			.web_socket
+			.stream
+			.inner()
+			.write_all_vectored(data)
 			.await?;
 
-		if self.web_socket.close_state == Some(Shutdown::Both) {
-			let mut byte = [0u8; 1];
+		if wrote < header.len() + frame.payload.len() {
+			return Err(Error::new(
+				ErrorKind::UnexpectedEof,
+				"End of file while writing frame"
+			));
+		}
 
-			self.web_socket
-				.stream
-				.inner()
-				.shutdown(Shutdown::Write)
-				.await?;
-
-			match select(
-				sleep(self.web_socket.close_timeout),
-				self.web_socket.stream.read(&mut byte)
-			)
-			.await
-			{
-				Select::First(..) => debug!(target: self, "== Close was not clean"),
-				_ => ()
-			}
+		if frame.op == Op::Close {
+			self.web_socket.shutdown(Shutdown::Write);
+			self.web_socket.maybe_close().await?;
 		}
 
 		Ok(())
@@ -519,38 +519,20 @@ impl WebSocket {
 		}
 	}
 
-	async fn write_all(&mut self, mut bufs: &mut [&[u8]]) -> Result<()> {
-		while bufs.len() > 0 {
-			let mut wrote = {
-				if bufs.len() == 2 {
-					self.stream
-						.inner()
-						.write_vectored(&[IoSlice::new(bufs[0]), IoSlice::new(bufs[1])])
-						.await?
-				} else {
-					self.stream
-						.inner()
-						.write_vectored(&[IoSlice::new(bufs[0])])
-						.await?
-				}
-			};
+	async fn maybe_close(&mut self) -> Result<()> {
+		if self.close_state == Some(Shutdown::Both) {
+			self.stream.inner().shutdown(Shutdown::Write).await?;
 
-			if wrote == 0 {
-				return Err(Error::new(
-					ErrorKind::UnexpectedEof,
-					"End of file while writing frame"
-				));
-			}
-
-			while bufs.len() > 0 {
-				if wrote >= bufs[0].len() {
-					wrote -= bufs[0].len();
-					bufs = &mut bufs[1..];
-				} else {
-					bufs[0] = &bufs[0][wrote..];
-
-					break;
-				}
+			match select(
+				sleep(self.close_timeout),
+				self.stream
+					.inner()
+					.poll(make_bitflags!(PollFlag::{RdHangUp}))
+			)
+			.await
+			{
+				Select::First(..) => debug!(target: self, "== Close was not clean"),
+				_ => ()
 			}
 		}
 

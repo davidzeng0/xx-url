@@ -22,7 +22,6 @@ impl Config {
 			.await?;
 
 		let config = ResolveConfig::parse(data).map_err(Error::map_as_invalid_data)?;
-
 		let mut name_servers = Vec::new();
 
 		for ip in &config.nameservers {

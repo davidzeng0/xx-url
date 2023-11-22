@@ -1,18 +1,15 @@
 use std::{collections::HashMap, str::from_utf8};
 
 use http::{Method, StatusCode};
-use xx_core::{async_std::io::*, error::*, trace};
+use xx_core::{
+	async_std::io::{typed::WriteTyped, *},
+	error::*,
+	trace
+};
 use xx_pulse::*;
 
 use super::{consts::*, handshake::Key, WsRequest};
-use crate::http::{
-	stream::HttpStream,
-	transfer::{
-		parse_version, read_headers_limited, read_line_in_place, transfer,
-		DEFAULT_MAXIMUM_HEADER_SIZE
-	},
-	Version
-};
+use crate::http::{stream::HttpStream, transfer::*, Version};
 
 macro_rules! check_header {
 	($headers: expr, $header: literal, $value: expr, $message: expr) => {
@@ -148,7 +145,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap
 pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufReader<HttpStream>> {
 	let (read, write) = stream.split();
 	let mut reader = BufReader::new(read);
-	let mut writer = TypedWriter::new(BufWriter::new(write));
+	let mut writer = BufWriter::new(write);
 
 	let headers = handle_request(&mut reader, log).await?;
 
