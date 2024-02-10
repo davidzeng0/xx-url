@@ -5,11 +5,16 @@ use std::{
 
 use http::Method;
 use url::Url;
-use xx_core::{error::*, task::Handle};
+use xx_core::{
+	coroutines::{with_context, Context, Task},
+	error::*,
+	macros::duration,
+	pointer::*
+};
 use xx_pulse::*;
 
 use super::WebSocket;
-use crate::http::transfer::Request;
+use crate::{error::UrlError, http::transfer::Request};
 
 const DEFAULT_MAX_MESSAGE_LENGTH: u64 = 128 * 1024 * 1024;
 
@@ -23,9 +28,9 @@ pub struct WebSocketOptions {
 impl WebSocketOptions {
 	pub fn new() -> Self {
 		Self {
-			handshake_timeout: Duration::from_secs(60),
+			handshake_timeout: duration!(1 m),
 			max_message_length: DEFAULT_MAX_MESSAGE_LENGTH,
-			close_timeout: Duration::from_secs(30)
+			close_timeout: duration!(0.5 m)
 		}
 	}
 
@@ -50,7 +55,7 @@ pub struct WsRequest {
 	pub(crate) options: WebSocketOptions
 }
 
-#[async_fn]
+#[asynchronous]
 impl WsRequest {
 	pub async fn run(&mut self) -> Result<WebSocket> {
 		WebSocket::new(self).await
@@ -75,8 +80,8 @@ impl WsRequest {
 impl Task for WsRequest {
 	type Output = Result<WebSocket>;
 
-	fn run(mut self, mut context: Handle<Context>) -> Result<WebSocket> {
-		context.run(WebSocket::new(&mut self))
+	fn run(mut self, context: Ptr<Context>) -> Result<WebSocket> {
+		unsafe { with_context(context, WebSocket::new(&mut self)) }
 	}
 }
 
@@ -103,12 +108,7 @@ pub fn open(url: &str) -> Result<WsRequest> {
 	match request.url.scheme() {
 		"ws" => (),
 		"wss" => request.options.secure = true,
-		_ => {
-			return Err(Error::new(
-				ErrorKind::InvalidInput,
-				"Scheme must be 'ws' or 'wss'"
-			))
-		}
+		_ => return Err(UrlError::InvalidScheme.new())
 	}
 
 	Ok(WsRequest { inner: request, options: WebSocketOptions::new() })

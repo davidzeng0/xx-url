@@ -57,7 +57,7 @@ impl LookupIp {
 	}
 }
 
-#[async_fn]
+#[asynchronous]
 impl Resolver {
 	pub async fn new() -> Result<Self> {
 		let Join(config, hosts) = join(Config::new(), Hosts::new()).await.flatten()?;

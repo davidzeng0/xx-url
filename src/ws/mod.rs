@@ -10,6 +10,8 @@ use num_derive::FromPrimitive;
 pub use web_socket::*;
 pub mod request;
 pub use request::*;
+pub mod errors;
+pub use errors::*;
 
 use self::wire::Op;
 

@@ -13,7 +13,7 @@ pub struct Hosts {
 	name: HashMap<Name, Results>
 }
 
-#[async_fn]
+#[asynchronous]
 impl Hosts {
 	pub async fn new() -> Result<Self> {
 		let mut hosts = Self { name: HashMap::new() };
@@ -92,7 +92,7 @@ impl Hosts {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Lookup for Hosts {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let results = match self.name.get(query.name()) {

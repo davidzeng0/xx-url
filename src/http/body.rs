@@ -6,6 +6,7 @@ use xx_core::{async_std::io::*, error::*, opt::hint::*, read_into, warn};
 use xx_pulse::*;
 
 use super::{stream::HttpStream, transfer::*};
+use crate::error::UrlError;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ChunkedState {
@@ -39,7 +40,7 @@ pub struct Body {
 	reusable: bool
 }
 
-#[async_fn]
+#[asynchronous]
 impl Body {
 	pub(crate) fn new(
 		reader: BufReader<HttpStream>, request: &Request, response: &Response
@@ -70,7 +71,7 @@ impl Body {
 			match u64::from_str_radix(&length, 10) {
 				Ok(len) => body.transfer = Transfer::Length(len),
 				Err(err) => {
-					return Err(Error::new(
+					return Err(Error::simple(
 						ErrorKind::InvalidData,
 						format!("Invalid content length: {}", err.to_string())
 					))
@@ -95,10 +96,6 @@ impl Body {
 		self.reader.inner().read(buf).await
 	}
 
-	fn eof_error() -> Error {
-		Error::new(ErrorKind::UnexpectedEof, "Partial file")
-	}
-
 	async fn read_chunk_size(&mut self) -> Result<()> {
 		/* double the size of u64, double again for hex */
 		let max_hex = size_of::<u64>() * 2 * 2;
@@ -120,7 +117,7 @@ impl Body {
 
 			/* fill does not discard unconsumed bytes */
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(Self::eof_error());
+				return Err(UrlError::PartialFile.new());
 			}
 		};
 
@@ -132,7 +129,7 @@ impl Body {
 		} else {
 			None
 		}
-		.ok_or_else(|| Error::new(ErrorKind::InvalidData, "Chunk size overflowed"))?;
+		.ok_or_else(|| Error::simple(ErrorKind::InvalidData, "Chunk size overflowed"))?;
 
 		/* index can't be negative here */
 		self.reader.consume(index as usize);
@@ -153,7 +150,7 @@ impl Body {
 			};
 
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(Self::eof_error());
+				return Err(UrlError::PartialFile.new());
 			}
 		}
 
@@ -183,7 +180,7 @@ impl Body {
 					let read = self.read_bytes(buf).await?;
 
 					if unlikely(read == 0) {
-						return Err(Self::eof_error());
+						return Err(UrlError::PartialFile.new());
 					}
 
 					remaining -= read as u64;
@@ -212,7 +209,7 @@ impl Body {
 		&mut self, out_key: &mut String, out_val: &mut String
 	) -> Result<Option<usize>> {
 		if self.transfer != Transfer::Trailers {
-			return Err(Error::new(
+			return Err(Error::simple(
 				ErrorKind::Other,
 				"Invalid state: either there is data left in the body or the stream has been \
 				 exhausted"
@@ -266,7 +263,7 @@ impl Body {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Read for Body {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		/* don't do read_into! here as it's done after calculating remaining bytes */
@@ -295,7 +292,7 @@ impl Read for Body {
 				let read = self.read_bytes(buf).await?;
 
 				if unlikely(read == 0) {
-					return Err(Self::eof_error());
+					return Err(UrlError::PartialFile.new());
 				}
 
 				remaining -= read as u64;

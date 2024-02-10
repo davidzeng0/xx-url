@@ -31,7 +31,7 @@ impl LookupResults {
 	}
 }
 
-#[async_trait]
+#[asynchronous]
 pub trait Lookup {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults>;
 }

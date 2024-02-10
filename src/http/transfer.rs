@@ -17,7 +17,7 @@ use xx_core::{
 use xx_pulse::*;
 
 use super::{stream::HttpStream, *};
-use crate::{net::connection::*, tls::connection::TlsConn};
+use crate::{error::UrlError, net::connection::*, tls::connection::TlsConn};
 
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */
@@ -127,7 +127,7 @@ impl HttpConnection {
 	}
 }
 
-#[async_fn]
+#[asynchronous]
 async fn get_connection_for(
 	request: &Request, url: &Url, _connection_pool: /* TOOD */ Option<()>
 ) -> Result<(HttpConnection, Option<Stats>)> {
@@ -170,7 +170,7 @@ async fn get_connection_for(
 	Ok((HttpConnection::new(stream), Some(stats)))
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn send_request(
 	writer: &mut impl Write, request: &Request, url: &Url, version: Version
 ) -> Result<()> {
@@ -217,7 +217,7 @@ pub async fn send_request(
 	Ok(())
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> {
 	let mut offset = 0;
 
@@ -240,19 +240,19 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		}
 
 		return if offset == reader.capacity() {
-			Err(Error::new(
+			Err(Error::simple(
 				ErrorKind::Other,
 				"Single header line exceeded buffer length"
 			))
 		} else {
-			Err(Error::new(
+			Err(Error::simple(
 				ErrorKind::UnexpectedEof,
 				"Stream ended on a header line"
 			))
 		};
 	}
 
-	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| invalid_utf8_error())?;
+	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| Core::InvalidUtf8)?;
 
 	if let Some(ln) = line.strip_suffix('\n') {
 		line = ln;
@@ -283,7 +283,7 @@ fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
 	Some((version, StatusCode::from_str(split.next()?).ok()?))
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn read_header_line_limited(
 	reader: &mut impl BufRead
 ) -> Result<Option<(String, Option<String>, usize)>> {
@@ -308,7 +308,7 @@ pub async fn read_header_line_limited(
 	Ok(result)
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn read_headers_limited<T>(
 	reader: &mut impl BufRead, headers: &mut HashMap<String, String>, mut size_limit: usize,
 	log: &T
@@ -322,7 +322,7 @@ pub async fn read_headers_limited<T>(
 		match size_limit.checked_sub(read) {
 			Some(new_limit) => size_limit = new_limit,
 			None => {
-				break Err(Error::new(
+				break Err(Error::simple(
 					ErrorKind::InvalidData,
 					"Exceeded maximum header size"
 				))
@@ -341,7 +341,7 @@ pub async fn read_headers_limited<T>(
 	}
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn parse_response(
 	reader: &mut impl BufRead, request: &Request, headers: &mut HashMap<String, String>
 ) -> Result<(StatusCode, Version)> {
@@ -355,7 +355,7 @@ pub async fn parse_response(
 				continue;
 			}
 
-			return Err(Error::new(
+			return Err(Error::simple(
 				ErrorKind::UnexpectedEof,
 				"End of file before a response could be read"
 			));
@@ -380,12 +380,12 @@ pub async fn parse_response(
 		reader.consume(offset);
 		result
 	}
-	.ok_or_else(|| Error::new(ErrorKind::InvalidData, "Invalid header line"))?;
+	.ok_or_else(|| Error::simple(ErrorKind::InvalidData, "Invalid header line"))?;
 
 	trace!(target: request, ">> {} {}", version.as_str(), status);
 
 	if version < request.options.min_version || version > request.options.max_version {
-		return Err(Error::new(
+		return Err(Error::simple(
 			ErrorKind::InvalidData,
 			format!("Unexpected version {}", version.as_str())
 		));
@@ -398,7 +398,7 @@ pub async fn parse_response(
 	match (request.options.maximum_header_size as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, headers, limit, request).await?,
 		None => {
-			return Err(Error::new(
+			return Err(Error::simple(
 				ErrorKind::InvalidData,
 				"Exceeded maximum header size"
 			))
@@ -416,7 +416,7 @@ pub struct Response {
 	pub url: Option<Url>
 }
 
-#[async_fn]
+#[asynchronous]
 pub async fn transfer(
 	request: &Request, connection_pool: Option<()>
 ) -> Result<(Response, BufReader<HttpStream>)> {
@@ -487,16 +487,13 @@ pub async fn transfer(
 
 				/* unborrow to keep compiler happy */
 				url = &request.url;
-				url = redirected_url.insert(
-					url.join(location)
-						.map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid redirect url"))?
-				);
+				url =
+					redirected_url.insert(url.join(location).map_err(|_| {
+						Error::simple(ErrorKind::InvalidData, "Invalid redirect url")
+					})?);
 
 				if url.scheme() != request.url.scheme() {
-					return Err(Error::new(
-						ErrorKind::Other,
-						"Redirect forbidden due to change in url scheme"
-					));
+					return Err(UrlError::RedirectForbidden.new());
 				}
 
 				response_headers = response.headers;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use http::StatusCode;
 use url::Url;
-use xx_core::{async_std::io::ReadExt, error::*};
+use xx_core::{async_std::io::ReadExt, coroutines::check_interrupt, error::*};
 use xx_pulse::*;
 
 use super::{
@@ -15,7 +15,7 @@ pub struct Response {
 	body: Body
 }
 
-#[async_fn]
+#[asynchronous]
 impl Response {
 	pub async fn fetch(request: &HttpRequest) -> Result<Response> {
 		let (response, reader) = transfer(request, None).await?;

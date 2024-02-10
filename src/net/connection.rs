@@ -1,6 +1,7 @@
 use std::{
 	io::{IoSlice, IoSliceMut},
 	net::{IpAddr, SocketAddr},
+	os::fd::AsRawFd,
 	sync::Arc,
 	time::{Duration, Instant}
 };
@@ -8,16 +9,18 @@ use std::{
 use enumflags2::{make_bitflags, BitFlags};
 use xx_core::{
 	async_std::io::*,
+	coroutines::check_interrupt,
 	debug,
 	error::*,
+	macros::wrapper_functions,
 	os::{
 		inet::IpProtocol,
 		poll::{poll, PollFd, PollFlag},
 		socket::{Shutdown, SocketType}
 	},
-	read_wrapper, wrapper_functions, write_wrapper
+	read_wrapper, write_wrapper
 };
-use xx_pulse::*;
+use xx_pulse::{impls::TaskExtensionsExt, *};
 
 use crate::{
 	dns::{LookupIp, Resolver},
@@ -121,30 +124,30 @@ pub struct Connection {
 	inner: Socket
 }
 
-#[async_fn]
+#[asynchronous]
 impl Connection {
 	wrapper_functions! {
 		inner = self.inner;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn recv(&self, buf: &mut [u8], flags: u32) -> Result<usize>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn send(&self, buf: &[u8], flags: u32) -> Result<usize>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn recv_vectored(&self, bufs: &mut [IoSliceMut<'_>], flags: u32) -> Result<usize>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn send_vectored(&self, bufs: &[IoSlice<'_>], flags: u32) -> Result<usize>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn close(self) -> Result<()>;
 	}
 
@@ -222,13 +225,10 @@ impl Connection {
 
 		let connection = match options.timeout {
 			None => Self::connect_to(&options, &addrs, &mut stats).await?,
-			Some(duration) => select(
-				Self::connect_to(&options, &addrs, &mut stats),
-				sleep(duration)
-			)
-			.await
-			.first()
-			.ok_or_else(|| Error::new(ErrorKind::TimedOut, "Connection timed out"))??
+			Some(duration) => Self::connect_to(&options, &addrs, &mut stats)
+				.timeout(duration)
+				.await
+				.ok_or_else(|| Core::ConnectTimeout.new())??
 		};
 
 		if let Some(size) = options.recvbuf_size {
@@ -262,10 +262,10 @@ impl Connection {
 
 		/* sync polling because we don't care about waiting, and async polling isn't
 		 * any faster */
-		let mut fds = [PollFd::new(self.inner.fd(), flags)];
+		let mut fds = [PollFd::new(self.inner.fd().as_raw_fd(), flags)];
 
 		/* we shouldn't need to handle EINTR here because the timeout is 0 */
-		if poll(&mut fds, 0)? == 0 {
+		if unsafe { poll(&mut fds, 0)? } == 0 {
 			/* no events */
 			Ok(false)
 		} else {
@@ -288,4 +288,4 @@ impl Write for Connection {
 	}
 }
 
-impl Split for Connection {}
+unsafe impl SimpleSplit for Connection {}

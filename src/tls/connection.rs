@@ -9,14 +9,16 @@ use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
 use xx_core::{
 	async_std::io::*,
+	coroutines::{check_interrupt, get_context, with_context, Context},
 	debug,
 	error::*,
+	macros::wrapper_functions,
 	os::{
 		poll::PollFlag,
 		socket::{MessageFlag, Shutdown}
 	},
-	task::Handle,
-	trace, wrapper_functions
+	pointer::Ptr,
+	trace
 };
 use xx_pulse::*;
 
@@ -39,33 +41,29 @@ impl From<connection::ConnectStats> for ConnectStats {
 
 struct AsyncConnection {
 	connection: Connection,
-	read_context: Handle<Context>,
-	write_context: Handle<Context>
+	read_context: Ptr<Context>,
+	write_context: Ptr<Context>
 }
 
 impl AsyncConnection {
 	fn new(connection: Connection) -> Self {
 		/* Safety: context is assigned before read/write operations */
-		unsafe {
-			Self {
-				read_context: Handle::null(),
-				write_context: Handle::null(),
-				connection
-			}
+		Self {
+			read_context: Ptr::null(),
+			write_context: Ptr::null(),
+			connection
 		}
 	}
 }
 
 impl io::Read for AsyncConnection {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		self.read_context
-			.run(self.connection.read(buf))
+		unsafe { with_context(self.read_context, self.connection.read(buf)) }
 			.map_err(|err| err.into())
 	}
 
 	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-		self.read_context
-			.run(self.connection.read_vectored(bufs))
+		unsafe { with_context(self.read_context, self.connection.read_vectored(bufs)) }
 			.map_err(|err| err.into())
 	}
 }
@@ -76,9 +74,13 @@ impl io::Write for AsyncConnection {
 	 * due to polling
 	 */
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		self.write_context
-			.run(self.connection.send(buf, MessageFlag::DontWait as u32))
-			.map_err(|err| err.into())
+		unsafe {
+			with_context(
+				self.write_context,
+				self.connection.send(buf, MessageFlag::DontWait as u32)
+			)
+		}
+		.map_err(|err| err.into())
 	}
 
 	fn flush(&mut self) -> io::Result<()> {
@@ -86,12 +88,14 @@ impl io::Write for AsyncConnection {
 	}
 
 	fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
-		self.write_context
-			.run(
+		unsafe {
+			with_context(
+				self.write_context,
 				self.connection
 					.send_vectored(bufs, MessageFlag::DontWait as u32)
 			)
-			.map_err(|err| err.into())
+		}
+		.map_err(|err| err.into())
 	}
 }
 
@@ -100,20 +104,20 @@ pub struct TlsConn {
 	tls: ClientConnection
 }
 
-#[async_fn]
+#[asynchronous]
 impl TlsConn {
 	wrapper_functions! {
 		inner = self.inner.connection;
 
 		pub fn has_peer_hungup(&self) -> Result<bool>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn close(self) -> Result<()>;
 	}
 
@@ -167,7 +171,7 @@ impl TlsConn {
 			match (eof, handshaking, self.tls.is_handshaking()) {
 				(_, true, false) | (_, false, _) => break,
 				(true, true, true) => {
-					return Err(Error::new(
+					return Err(Error::simple(
 						ErrorKind::UnexpectedEof,
 						"EOF while handshaking"
 					))
@@ -316,7 +320,7 @@ impl TlsConn {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Read for TlsConn {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		self.recv(buf).await
@@ -331,7 +335,7 @@ impl Read for TlsConn {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Write for TlsConn {
 	async fn write(&mut self, buf: &[u8]) -> Result<usize> {
 		self.send(buf).await
@@ -346,4 +350,4 @@ impl Write for TlsConn {
 	}
 }
 
-impl Split for TlsConn {}
+unsafe impl SimpleSplit for TlsConn {}

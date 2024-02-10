@@ -2,21 +2,22 @@ use enumflags2::BitFlags;
 use xx_core::{
 	async_std::io::*,
 	error::Result,
+	macros::wrapper_functions,
 	os::{poll::PollFlag, socket::Shutdown},
-	read_wrapper, wrapper_functions, write_wrapper
+	read_wrapper, write_wrapper
 };
 use xx_pulse::*;
 
 use crate::{net::connection::Connection, tls::connection::TlsConn};
 
-#[async_trait]
+#[asynchronous]
 pub(crate) trait Inner: Read + Write {
 	async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
 	async fn shutdown(&mut self, how: Shutdown) -> Result<()>;
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Inner for StreamSocket {
 	async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
 		StreamSocket::poll(self, flags).await
@@ -27,7 +28,7 @@ impl Inner for StreamSocket {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Inner for Connection {
 	async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
 		Connection::poll(self, flags).await
@@ -38,7 +39,7 @@ impl Inner for Connection {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Inner for TlsConn {
 	async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
 		TlsConn::poll(self, flags).await
@@ -53,15 +54,15 @@ pub struct HttpStream {
 	inner: Box<dyn Inner>
 }
 
-#[async_fn]
+#[asynchronous]
 impl HttpStream {
 	wrapper_functions! {
 		inner = self.inner;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn shutdown(&mut self, how: Shutdown) -> Result<()>;
 
-		#[async_fn]
+		#[asynchronous]
 		pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 	}
 
@@ -84,4 +85,4 @@ impl Write for HttpStream {
 	}
 }
 
-impl Split for HttpStream {}
+unsafe impl SimpleSplit for HttpStream {}

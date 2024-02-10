@@ -2,15 +2,20 @@ use std::ops::{Deref, DerefMut};
 
 use http::Method;
 use url::Url;
-use xx_core::{error::*, task::Handle};
+use xx_core::{
+	coroutines::{with_context, Context, Task},
+	error::*,
+	pointer::*
+};
 use xx_pulse::*;
 
 use super::{transfer::Request, Response};
+use crate::error::UrlError;
 pub struct HttpRequest {
 	inner: Request
 }
 
-#[async_fn]
+#[asynchronous]
 impl HttpRequest {
 	pub async fn run(&self) -> Result<Response> {
 		Response::fetch(self).await
@@ -20,8 +25,8 @@ impl HttpRequest {
 impl Task for HttpRequest {
 	type Output = Result<Response>;
 
-	fn run(self, mut context: Handle<Context>) -> Result<Response> {
-		context.run(Response::fetch(&self))
+	fn run(self, context: Ptr<Context>) -> Result<Response> {
+		unsafe { with_context(context, Response::fetch(&self)) }
 	}
 }
 
@@ -48,12 +53,7 @@ fn new_request(url: &str, method: Method) -> Result<HttpRequest> {
 	match request.url.scheme() {
 		"http" => (),
 		"https" => request.options.secure = true,
-		_ => {
-			return Err(Error::new(
-				ErrorKind::InvalidInput,
-				"Scheme must be either 'http' or 'https'"
-			))
-		}
+		_ => return Err(UrlError::InvalidScheme.new())
 	}
 
 	Ok(HttpRequest { inner: request })

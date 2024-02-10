@@ -1,5 +1,6 @@
 pub mod dns;
 pub mod env;
+pub mod error;
 pub mod file;
 pub mod http;
 pub mod net;

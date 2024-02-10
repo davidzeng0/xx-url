@@ -11,7 +11,7 @@ pub struct FileStream {
 	end: u64
 }
 
-#[async_fn]
+#[asynchronous]
 impl FileStream {
 	pub async fn new(request: &Request) -> Result<FileStream> {
 		let mut file = File::open(request.url.path()).await?;
@@ -42,7 +42,7 @@ impl FileStream {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Read for FileStream {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		let remaining = (self.len() - self.pos()) as usize;
@@ -53,7 +53,7 @@ impl Read for FileStream {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Seek for FileStream {
 	async fn seek(&mut self, seek: SeekFrom) -> Result<u64> {
 		let pos = match seek {

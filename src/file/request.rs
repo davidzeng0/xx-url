@@ -1,8 +1,13 @@
 use url::Url;
-use xx_core::{error::*, task::Handle};
+use xx_core::{
+	coroutines::{with_context, Context, Task},
+	error::*,
+	pointer::*
+};
 use xx_pulse::*;
 
 use super::stream::FileStream;
+use crate::error::UrlError;
 
 pub struct Request {
 	pub(crate) url: Url,
@@ -19,7 +24,7 @@ impl Request {
 		};
 
 		if this.url.scheme() != "file" {
-			return Err(Error::new(ErrorKind::InvalidInput, "Scheme must be 'file'"));
+			return Err(UrlError::InvalidScheme.new());
 		}
 
 		Ok(this)
@@ -35,7 +40,7 @@ impl Request {
 		self
 	}
 
-	#[async_fn]
+	#[asynchronous]
 	pub async fn run(&self) -> Result<FileStream> {
 		FileStream::new(self).await
 	}
@@ -44,8 +49,8 @@ impl Request {
 impl Task for Request {
 	type Output = Result<FileStream>;
 
-	fn run(self, mut context: Handle<Context>) -> Result<FileStream> {
-		context.run(FileStream::new(&self))
+	fn run(self, context: Ptr<Context>) -> Result<FileStream> {
+		unsafe { with_context(context, FileStream::new(&self)) }
 	}
 }
 

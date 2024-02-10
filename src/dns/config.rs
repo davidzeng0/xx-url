@@ -12,7 +12,7 @@ pub struct Config {
 	pub timeout: Duration
 }
 
-#[async_fn]
+#[asynchronous]
 impl Config {
 	pub async fn new() -> Result<Self> {
 		let mut data = Vec::new();

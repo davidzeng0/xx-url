@@ -11,20 +11,20 @@ use xx_core::{
 		io::{typed::BufReadTyped, *},
 		AsyncIterator
 	},
+	coroutines::{with_context, Context, Task},
 	debug,
 	error::*,
 	os::{poll::PollFlag, socket::Shutdown},
-	pointer::MutPtr,
-	read_into,
-	task::Handle
+	pointer::*,
+	read_into
 };
-use xx_pulse::*;
+use xx_pulse::{impls::TaskExtensionsExt, *};
 
 use super::{
 	mask,
 	transfer::{connect, handle_upgrade},
 	wire::*,
-	BorrowedFrame, CloseCode, ControlFrame, Frame, WebSocketOptions, WsRequest
+	BorrowedFrame, CloseCode, ControlFrame, Frame, WebSocketError, WebSocketOptions, WsRequest
 };
 use crate::http::stream::HttpStream;
 
@@ -35,7 +35,7 @@ pub struct FrameHeader {
 	len: u64
 }
 
-#[async_fn]
+#[asynchronous]
 async fn decode_length(len: u8, reader: &mut impl BufRead) -> Result<u64> {
 	if len < 0x7e {
 		Ok(len as u64)
@@ -62,7 +62,7 @@ fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 	}
 }
 
-#[async_fn]
+#[asynchronous]
 impl FrameHeader {
 	async fn read(reader: &mut impl BufRead) -> Result<Option<Self>> {
 		let flags: [u8; 2] = match reader.read_type().await? {
@@ -92,9 +92,9 @@ impl FrameHeader {
 		writer.set_position((pos + MutableFrameHeaderPacket::minimum_packet_size()) as u64);
 
 		let len = encode_len(self.len, writer)?;
+		let mut flags =
+			MutableFrameHeaderPacket::new(&mut writer.get_mut()[pos as usize..]).unwrap();
 
-		let mut flags = MutableFrameHeaderPacket::new(&mut writer.get_mut()[pos as usize..])
-			.ok_or_else(|| Error::Simple(ErrorKind::InvalidInput))?;
 		flags.set_fin(self.fin as u8);
 		flags.set_resv(0);
 		flags.set_op(self.op as u8);
@@ -113,11 +113,11 @@ pub struct Reader<'a> {
 	web_socket: &'a mut WebSocket
 }
 
-#[async_fn]
+#[asynchronous]
 impl<'a> Reader<'a> {
 	pub async fn read_frame_header(&mut self) -> Result<Option<FrameHeader>> {
 		if !self.web_socket.can_read() {
-			return Err(Error::new(ErrorKind::Other, "Read end is shutdown"));
+			return Err(Core::Shutdown.new());
 		}
 
 		let frame = match FrameHeader::read(&mut self.web_socket.stream).await? {
@@ -130,19 +130,19 @@ impl<'a> Reader<'a> {
 		};
 
 		if frame.op == Op::Invalid {
-			return Err(Error::new(ErrorKind::InvalidData, "Invalid opcode"));
+			return Err(WebSocketError::InvalidOpcode.new());
 		}
 
 		if frame.op.is_control() {
 			if !frame.fin {
-				return Err(Error::new(
+				return Err(Error::simple(
 					ErrorKind::InvalidData,
 					"Fin not set on a control frame"
 				));
 			}
 
 			if frame.len > 0x7d {
-				return Err(Error::new(
+				return Err(Error::simple(
 					ErrorKind::InvalidData,
 					"Control frame exceeded maximum size"
 				));
@@ -150,15 +150,9 @@ impl<'a> Reader<'a> {
 		} else {
 			if self.web_socket.expect_continuation != (frame.op == Op::Continuation) {
 				if self.web_socket.expect_continuation {
-					return Err(Error::new(
-						ErrorKind::InvalidData,
-						"Expected a continuation frame"
-					));
+					return Err(WebSocketError::ExpectedContinuation.new());
 				} else {
-					return Err(Error::new(
-						ErrorKind::InvalidData,
-						"Unexpected continuation frame"
-					));
+					return Err(WebSocketError::UnexpectedContinuation.new());
 				}
 			}
 
@@ -166,10 +160,7 @@ impl<'a> Reader<'a> {
 		}
 
 		if frame.mask.is_some() && self.web_socket.is_client {
-			return Err(Error::new(
-				ErrorKind::InvalidData,
-				"Received masked frame from server"
-			));
+			return Err(WebSocketError::ServerMasked.new());
 		}
 
 		if frame.op == Op::Close {
@@ -189,7 +180,7 @@ impl<'a> Reader<'a> {
 				self.web_socket.stream.discard();
 
 				if self.web_socket.stream.fill().await? == 0 {
-					return Err(Error::new(
+					return Err(Error::simple(
 						ErrorKind::UnexpectedEof,
 						"End of file mid frame"
 					));
@@ -211,15 +202,15 @@ impl<'a> Reader<'a> {
 	) -> Result<usize> {
 		read_into!(buf, header.len as usize);
 
-		match stream.read_exact_or_err(buf).await {
-			Ok(()) => {
+		match stream.read_exact(buf).await {
+			Ok(_) => {
 				header.len -= buf.len() as u64;
 
 				return Ok(buf.len());
 			}
 
 			Err(err) => Err(if err.kind() == ErrorKind::UnexpectedEof {
-				Error::new(ErrorKind::UnexpectedEof, "End of file mid frame")
+				Error::simple(ErrorKind::UnexpectedEof, "End of file mid frame")
 			} else {
 				err
 			})
@@ -241,7 +232,7 @@ pub struct Frames<'a> {
 	reader: Reader<'a>
 }
 
-#[async_fn]
+#[asynchronous]
 impl<'a> Frames<'a> {
 	async fn read_frame(&mut self) -> Result<Option<Frame>> {
 		let mut frame = match self.reader.read_frame_header().await? {
@@ -296,7 +287,7 @@ impl<'a> Frames<'a> {
 				.max_message_length
 				.checked_sub(buf.len() as u64)
 				.and_then(|len| len.checked_sub(frame.len))
-				.ok_or_else(|| Error::new(ErrorKind::Other, "Maximum message length exceeded"))?;
+				.ok_or_else(|| WebSocketError::MessageTooLong.new())?;
 			buf.reserve(frame.len as usize);
 
 			unsafe {
@@ -321,7 +312,7 @@ impl<'a> Frames<'a> {
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
 					Op::Text => {
-						Frame::Text(String::from_utf8(buf).map_err(|_| invalid_utf8_error())?)
+						Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8.new())?)
 					}
 					_ => unreachable!()
 				})
@@ -338,7 +329,7 @@ impl<'a> Frames<'a> {
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl<'a> AsyncIterator for Frames<'a> {
 	type Item = Result<Frame>;
 
@@ -355,11 +346,11 @@ pub struct Writer<'a> {
 	web_socket: &'a mut WebSocket
 }
 
-#[async_fn]
+#[asynchronous]
 impl<'a> Writer<'a> {
 	pub async fn send_frame<'b>(&mut self, frame: impl Into<BorrowedFrame<'b>>) -> Result<()> {
 		if !self.web_socket.can_write() {
-			return Err(Error::new(ErrorKind::Other, "Write end is shutdown"));
+			return Err(Core::Shutdown.new());
 		}
 
 		let frame = frame.into();
@@ -380,7 +371,7 @@ impl<'a> Writer<'a> {
 			}
 
 			if header.len > 0x7d {
-				return Err(Error::new(
+				return Err(Error::simple(
 					ErrorKind::InvalidInput,
 					"Control frame data too long"
 				));
@@ -388,10 +379,7 @@ impl<'a> Writer<'a> {
 		} else {
 			if let Some(op) = self.web_socket.last_sent_message_op {
 				if op != header.op {
-					return Err(Error::new(
-						ErrorKind::InvalidInput,
-						"Cannot send mismatching data types in chunks"
-					));
+					return Err(WebSocketError::DataTypeMismatch.new());
 				}
 
 				header.op = Op::Continuation;
@@ -428,7 +416,7 @@ impl<'a> Writer<'a> {
 			.await?;
 
 		if wrote < header.len() + frame.payload.len() {
-			return Err(Error::new(
+			return Err(Error::simple(
 				ErrorKind::UnexpectedEof,
 				"End of file while writing frame"
 			));
@@ -455,10 +443,10 @@ pub struct WebSocket {
 
 	is_client: bool,
 	expect_continuation: bool,
-	close_state: Option<Shutdown>
+	close_state: UnsafeCell<Option<Shutdown>>
 }
 
-#[async_fn]
+#[asynchronous]
 impl WebSocket {
 	fn _new(stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool) -> Self {
 		Self {
@@ -472,7 +460,7 @@ impl WebSocket {
 
 			is_client,
 			expect_continuation: false,
-			close_state: None
+			close_state: UnsafeCell::new(None)
 		}
 	}
 
@@ -499,39 +487,40 @@ impl WebSocket {
 	pub fn can_read(&self) -> bool {
 		!self
 			.close_state
+			.as_ref()
 			.is_some_and(|state| state != Shutdown::Write)
 	}
 
 	pub fn can_write(&self) -> bool {
 		!self
 			.close_state
+			.as_ref()
 			.is_some_and(|state| state != Shutdown::Read)
 	}
 
 	fn shutdown(&mut self, how: Shutdown) {
 		/* this is the only shared value when split. prevent caching */
-		let this = MutPtr::from(self).as_mut();
+		let close_state = self.close_state.as_mut();
 
-		match this.close_state {
-			None => this.close_state = Some(how),
-			Some(cur) if cur == how => (),
-			Some(_) => this.close_state = Some(Shutdown::Both)
+		match close_state {
+			None => *close_state = Some(how),
+			Some(cur) if *cur == how => (),
+			Some(_) => *close_state = Some(Shutdown::Both)
 		}
 	}
 
 	async fn maybe_close(&mut self) -> Result<()> {
-		if self.close_state == Some(Shutdown::Both) {
+		if self.close_state.as_ref() == &Some(Shutdown::Both) {
 			self.stream.inner().shutdown(Shutdown::Write).await?;
 
-			match select(
-				sleep(self.close_timeout),
-				self.stream
-					.inner()
-					.poll(make_bitflags!(PollFlag::{RdHangUp}))
-			)
-			.await
+			match self
+				.stream
+				.inner()
+				.poll(make_bitflags!(PollFlag::{RdHangUp}))
+				.timeout(self.close_timeout)
+				.await
 			{
-				Select::First(..) => debug!(target: self, "== Close was not clean"),
+				None => debug!(target: self, "== Close was not clean"),
 				_ => ()
 			}
 		}
@@ -549,9 +538,9 @@ impl WebSocket {
 
 	/// Safety: same thread
 	pub fn split(&mut self) -> (Reader<'_>, Writer<'_>) {
-		let mut this = MutPtr::from(self);
+		let this = MutPtr::from(self);
 
-		(this.as_mut().reader(), this.as_mut().writer())
+		unsafe { (this.as_mut().reader(), this.as_mut().writer()) }
 	}
 }
 
@@ -565,26 +554,16 @@ pub struct WebSocketHandle {
 	options: WebSocketOptions
 }
 
-#[async_fn]
+#[asynchronous]
 impl WebSocketHandle {
 	async fn accept_websocket(self) -> Result<WebSocket> {
 		struct WSServer {}
 
 		let server = WSServer {};
-		let stream = match select(
-			handle_upgrade(self.stream, &server),
-			sleep(self.options.handshake_timeout)
-		)
-		.await
-		{
-			Select::First(stream, _) => stream?,
-			Select::Second(..) => {
-				return Err(Error::new(
-					ErrorKind::TimedOut,
-					"Client handshake timed out"
-				))
-			}
-		};
+		let stream = handle_upgrade(self.stream, &server)
+			.timeout(self.options.handshake_timeout)
+			.await
+			.ok_or_else(|| Error::simple(ErrorKind::TimedOut, "Client handshake timed out"))??;
 
 		Ok(WebSocket::server(stream, &self.options))
 	}
@@ -593,12 +572,12 @@ impl WebSocketHandle {
 impl Task for WebSocketHandle {
 	type Output = Result<WebSocket>;
 
-	fn run(self, mut context: Handle<Context>) -> Self::Output {
-		context.run(self.accept_websocket())
+	fn run(self, context: Ptr<Context>) -> Self::Output {
+		unsafe { with_context(context, self.accept_websocket()) }
 	}
 }
 
-#[async_fn]
+#[asynchronous]
 impl WebSocketServer {
 	pub async fn bind<A: ToSocketAddrs>(addrs: A, options: WebSocketOptions) -> Result<Self> {
 		let listener = Tcp::bind(addrs).await?;

@@ -64,12 +64,12 @@ fn get_global_data() -> &'static GlobalData {
 	let mut data = unsafe { &GLOBAL_DATA }.lock().unwrap();
 
 	if let Some(config) = &*data {
-		return Ptr::from(config).as_ref();
+		return unsafe { Ptr::from(config).as_ref() };
 	}
 
 	*data = Some(create_global_data());
 
-	Ptr::from((&*data).as_ref().unwrap()).as_ref()
+	unsafe { Ptr::from((&*data).as_ref().unwrap()).as_ref() }
 }
 
 fn create_thread_local_data() -> ThreadLocalData {
@@ -82,17 +82,19 @@ fn create_thread_local_data() -> ThreadLocalData {
 }
 
 fn get_data() -> &'static ThreadLocalData {
-	THREAD_LOCAL_DATA
-		.with(|data| {
-			if let Some(data) = &*data.borrow() {
-				return Ptr::from(data);
-			}
+	unsafe {
+		THREAD_LOCAL_DATA
+			.with(|data| {
+				if let Some(data) = &*data.borrow() {
+					return Ptr::from(data);
+				}
 
-			*data.borrow_mut() = Some(create_thread_local_data());
+				*data.borrow_mut() = Some(create_thread_local_data());
 
-			data.borrow().as_ref().unwrap().into()
-		})
-		.as_ref()
+				data.borrow().as_ref().unwrap().into()
+			})
+			.as_ref()
+	}
 }
 
 pub fn resolver_conf_path() -> &'static str {

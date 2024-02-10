@@ -1,9 +1,7 @@
-use std::{
-	net::{IpAddr, SocketAddr},
-	time::Duration
-};
+use std::net::{IpAddr, SocketAddr};
 
-use xx_core::trace;
+use xx_core::{macros::duration, trace};
+use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
 
@@ -18,8 +16,8 @@ impl NameServer {
 	}
 }
 
+#[asynchronous]
 impl NameServer {
-	#[async_fn]
 	async fn get_matching_message(&self, socket: &DatagramSocket, id: u16) -> Result<Message> {
 		let mut buf = [0u8; 512];
 
@@ -37,27 +35,20 @@ impl NameServer {
 		}
 	}
 
-	#[async_fn]
 	async fn request(&self, message: Message) -> Result<Message> {
 		let socket = Udp::connect(SocketAddr::new(self.ip, 53)).await?;
 		let payload = message.to_vec().map_err(Error::map_as_other)?;
 
 		socket.send(&payload, 0).await?;
 
-		let result = select(
-			self.get_matching_message(&socket, message.id()),
-			sleep(Duration::from_secs(5))
-		)
-		.await;
-
-		match result {
-			Select::First(len, _) => Ok(len?),
-			Select::Second(..) => Err(Error::new(ErrorKind::TimedOut, "DNS query timed Out"))
-		}
+		self.get_matching_message(&socket, message.id())
+			.timeout(duration!(5 s))
+			.await
+			.ok_or_else(|| Error::simple(ErrorKind::TimedOut, "DNS query timed Out"))?
 	}
 }
 
-#[async_trait_impl]
+#[asynchronous]
 impl Lookup for NameServer {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let mut message = Message::new();
