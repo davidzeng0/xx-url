@@ -1,10 +1,5 @@
 pub mod web_socket;
-use std::{
-	fmt,
-	mem::{size_of, transmute, MaybeUninit},
-	slice,
-	str::from_utf8
-};
+use std::{fmt, str::from_utf8};
 
 use num_derive::FromPrimitive;
 pub use web_socket::*;
@@ -115,7 +110,7 @@ impl<'a> From<&'a [u8]> for BorrowedFrame<'a> {
 }
 
 pub struct ControlFrame {
-	data: [MaybeUninit<u8>; Self::MAX_LENGTH],
+	data: [u8; Self::MAX_LENGTH],
 	offset: u8,
 	length: u8
 }
@@ -124,19 +119,15 @@ impl ControlFrame {
 	pub const MAX_LENGTH: usize = 0x7d;
 
 	pub fn new() -> Self {
-		Self {
-			data: [MaybeUninit::uninit(); Self::MAX_LENGTH],
-			offset: 0,
-			length: 0
-		}
+		Self { data: [0; Self::MAX_LENGTH], offset: 0, length: 0 }
 	}
 
 	pub fn data(&self) -> &[u8] {
-		unsafe { transmute(&self.data[self.offset as usize..self.length as usize]) }
+		&self.data[self.offset as usize..self.length as usize]
 	}
 
 	pub fn data_mut(&mut self) -> &mut [u8] {
-		unsafe { transmute(&mut self.data[self.offset as usize..self.length as usize]) }
+		&mut self.data[self.offset as usize..self.length as usize]
 	}
 }
 
@@ -185,31 +176,21 @@ impl fmt::Display for Frame {
 	}
 }
 
-pub fn mask(data: &mut [u8], mask: u32) {
-	let vec = unsafe {
-		slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u32, data.len() / size_of::<u32>())
-	};
+pub fn mask(data: &mut [u8], mut mask: u32) {
+	let (pre, align, post) = unsafe { data.align_to_mut::<u32>() };
 
-	for val in vec.iter_mut() {
+	for byte in pre.iter_mut() {
+		*byte ^= (mask >> 24) as u8;
+		mask = mask.rotate_left(8);
+	}
+
+	/* this loop gets vectorized */
+	for val in align.iter_mut() {
 		*val ^= mask.to_be();
 	}
 
-	let mut offset = vec.len() * size_of::<u32>();
-
-	if offset < data.len() {
-		data[offset] ^= (mask >> 24) as u8;
-		offset += 1;
+	for byte in post.iter_mut() {
+		*byte ^= (mask >> 24) as u8;
+		mask = mask.rotate_left(8);
 	}
-
-	if offset < data.len() {
-		data[offset] ^= (mask >> 16) as u8;
-		offset += 1;
-	}
-
-	if offset < data.len() {
-		data[offset] ^= (mask >> 8) as u8;
-		offset += 1;
-	}
-
-	debug_assert_eq!(offset, data.len());
 }

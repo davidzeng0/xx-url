@@ -1,20 +1,17 @@
-use std::{
-	ops::{Deref, DerefMut},
-	time::Duration
-};
+use std::time::Duration;
 
 use http::Method;
 use url::Url;
 use xx_core::{
 	coroutines::{with_context, Context, Task},
 	error::*,
-	macros::duration,
+	macros::{duration, wrapper_functions},
 	pointer::*
 };
 use xx_pulse::*;
 
 use super::WebSocket;
-use crate::{error::UrlError, http::transfer::Request};
+use crate::{error::UrlError, http::transfer::Request, net::connection::IpStrategy};
 
 const DEFAULT_MAX_MESSAGE_LENGTH: u64 = 128 * 1024 * 1024;
 
@@ -57,6 +54,29 @@ pub struct WsRequest {
 
 #[asynchronous]
 impl WsRequest {
+	wrapper_functions! {
+		inner = self.inner;
+		mut inner = self.inner;
+
+		#[chain]
+		pub fn header(&mut self, key: impl ToString, value: impl ToString) -> &mut Self;
+
+		#[chain]
+		pub fn set_port(&mut self, port: u16) -> &mut Self;
+
+		#[chain]
+		pub fn set_strategy(&mut self, strategy: IpStrategy) -> &mut Self;
+
+		#[chain]
+		pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self;
+
+		#[chain]
+		pub fn set_recvbuf_size(&mut self, size: i32) -> &mut Self;
+
+		#[chain]
+		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
+	}
+
 	pub async fn run(&mut self) -> Result<WebSocket> {
 		WebSocket::new(self).await
 	}
@@ -82,20 +102,6 @@ impl Task for WsRequest {
 
 	fn run(mut self, context: Ptr<Context>) -> Result<WebSocket> {
 		unsafe { with_context(context, WebSocket::new(&mut self)) }
-	}
-}
-
-impl Deref for WsRequest {
-	type Target = Request;
-
-	fn deref(&self) -> &Request {
-		&self.inner
-	}
-}
-
-impl DerefMut for WsRequest {
-	fn deref_mut(&mut self) -> &mut Request {
-		&mut self.inner
 	}
 }
 

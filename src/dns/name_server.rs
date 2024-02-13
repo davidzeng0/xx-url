@@ -4,6 +4,7 @@ use xx_core::{macros::duration, trace};
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
+use crate::error::UrlError;
 
 #[derive(Debug, Clone)]
 pub struct NameServer {
@@ -23,7 +24,10 @@ impl NameServer {
 
 		loop {
 			let len = socket.recv(&mut buf, 0).await?;
-			let message = Message::from_bytes(&buf[0..len]).map_err(Error::map_as_other)?;
+			let message = match Message::from_bytes(&buf[0..len]) {
+				Ok(message) => message,
+				_ => continue
+			};
 
 			if message.id() != id {
 				trace!(target: self, "== Got mismatching message ids: {} =/= {}", id, message.id());
@@ -44,7 +48,7 @@ impl NameServer {
 		self.get_matching_message(&socket, message.id())
 			.timeout(duration!(5 s))
 			.await
-			.ok_or_else(|| Error::simple(ErrorKind::TimedOut, "DNS query timed Out"))?
+			.ok_or_else(|| UrlError::DnsTimedOut.new())?
 	}
 }
 

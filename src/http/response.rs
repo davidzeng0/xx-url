@@ -18,8 +18,8 @@ pub struct Response {
 #[asynchronous]
 impl Response {
 	pub async fn fetch(request: &HttpRequest) -> Result<Response> {
-		let (response, reader) = transfer(request, None).await?;
-		let body = Body::new(reader, request, &response)?;
+		let (response, reader) = transfer(&request.inner, None).await?;
+		let body = Body::new(reader, &request.inner, &response)?;
 
 		Ok(Self { response, body })
 	}

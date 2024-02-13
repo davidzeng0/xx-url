@@ -1,7 +1,6 @@
 use std::{
 	io::{IoSlice, IoSliceMut},
 	net::{IpAddr, SocketAddr},
-	os::fd::AsRawFd,
 	sync::Arc,
 	time::{Duration, Instant}
 };
@@ -15,7 +14,7 @@ use xx_core::{
 	macros::wrapper_functions,
 	os::{
 		inet::IpProtocol,
-		poll::{poll, PollFd, PollFlag},
+		poll::{poll, BorrowedPollFd, PollFlag},
 		socket::{Shutdown, SocketType}
 	},
 	read_wrapper, write_wrapper
@@ -255,17 +254,17 @@ impl Connection {
 	}
 
 	pub fn has_peer_hungup(&self) -> Result<bool> {
-		/* error and hangup are ignored in the input,
+		/* error and hangup are ignored by the syscall,
 		 * we only use it to check for intersection
 		 */
 		let flags = make_bitflags!(PollFlag::{RdHangUp | HangUp | Error});
 
 		/* sync polling because we don't care about waiting, and async polling isn't
 		 * any faster */
-		let mut fds = [PollFd::new(self.inner.fd().as_raw_fd(), flags)];
+		let mut fds = [BorrowedPollFd::new(self.inner.fd(), flags)];
 
 		/* we shouldn't need to handle EINTR here because the timeout is 0 */
-		if unsafe { poll(&mut fds, 0)? } == 0 {
+		if poll(&mut fds, 0)? == 0 {
 			/* no events */
 			Ok(false)
 		} else {

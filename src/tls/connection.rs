@@ -170,12 +170,7 @@ impl TlsConn {
 
 			match (eof, handshaking, self.tls.is_handshaking()) {
 				(_, true, false) | (_, false, _) => break,
-				(true, true, true) => {
-					return Err(Error::simple(
-						ErrorKind::UnexpectedEof,
-						"EOF while handshaking"
-					))
-				}
+				(true, true, true) => return Err(Core::UnexpectedEof.new()),
 				(..) => ()
 			}
 		}
@@ -219,9 +214,7 @@ impl TlsConn {
 			ClientConnection::new(config, server_name).map_err(Error::map_as_invalid_input)?;
 
 		let (connection, stats) = Connection::connect_stats(options).await?;
-
 		let mut connection = TlsConn { inner: AsyncConnection::new(connection), tls };
-
 		let mut stats = stats.into();
 
 		connection.tls_connect(&mut stats).await?;

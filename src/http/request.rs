@@ -1,22 +1,46 @@
-use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 
 use http::Method;
 use url::Url;
 use xx_core::{
 	coroutines::{with_context, Context, Task},
 	error::*,
+	macros::wrapper_functions,
 	pointer::*
 };
 use xx_pulse::*;
 
 use super::{transfer::Request, Response};
-use crate::error::UrlError;
+use crate::{error::UrlError, net::connection::IpStrategy};
 pub struct HttpRequest {
-	inner: Request
+	pub(super) inner: Request
 }
 
 #[asynchronous]
 impl HttpRequest {
+	wrapper_functions! {
+		inner = self.inner;
+		mut inner = self.inner;
+
+		#[chain]
+		pub fn header(&mut self, key: impl ToString, value: impl ToString) -> &mut Self;
+
+		#[chain]
+		pub fn set_port(&mut self, port: u16) -> &mut Self;
+
+		#[chain]
+		pub fn set_strategy(&mut self, strategy: IpStrategy) -> &mut Self;
+
+		#[chain]
+		pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self;
+
+		#[chain]
+		pub fn set_recvbuf_size(&mut self, size: i32) -> &mut Self;
+
+		#[chain]
+		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
+	}
+
 	pub async fn run(&self) -> Result<Response> {
 		Response::fetch(self).await
 	}
@@ -30,23 +54,9 @@ impl Task for HttpRequest {
 	}
 }
 
-impl Deref for HttpRequest {
-	type Target = Request;
-
-	fn deref(&self) -> &Request {
-		&self.inner
-	}
-}
-
-impl DerefMut for HttpRequest {
-	fn deref_mut(&mut self) -> &mut Request {
-		&mut self.inner
-	}
-}
-
 fn new_request(url: &str, method: Method) -> Result<HttpRequest> {
 	let mut request = Request::new(
-		Url::parse(url).map_err(Error::map_as_invalid_input)?,
+		Url::parse(url).map_err(|_| UrlError::InvalidUrl.new())?,
 		method
 	);
 

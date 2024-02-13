@@ -8,16 +8,16 @@ use xx_core::{
 };
 use xx_pulse::{impls::TaskExtensionsExt, *};
 
-use super::{consts::*, handshake::Key, WsRequest};
-use crate::http::{stream::HttpStream, transfer::*, Version};
+use super::{consts::*, handshake::Key, WebSocketError, WsRequest};
+use crate::http::{error::HttpError, stream::HttpStream, transfer::*, Version};
 
 macro_rules! check_header {
-	($headers: expr, $header: literal, $value: expr, $message: expr) => {
+	($headers: expr, $header: literal, $value: expr, $error: expr) => {
 		if !$headers
 			.get($header)
 			.is_some_and(|val| val.eq_ignore_ascii_case($value))
 		{
-			return Err(Error::simple(ErrorKind::InvalidData, $message));
+			return Err($error);
 		}
 	};
 }
@@ -55,34 +55,31 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 	let (response, reader) = transfer(&request, None)
 		.timeout(timeout)
 		.await
-		.ok_or_else(|| Error::simple(ErrorKind::TimedOut, "WebSocket connection timed out"))??;
+		.ok_or_else(|| WebSocketError::HandshakeTimeout.new())??;
 
 	if response.status != StatusCode::SWITCHING_PROTOCOLS {
-		return Err(Error::simple(
-			ErrorKind::InvalidData,
-			"Status code mismatch, expected 'Switching Protocols'"
-		));
+		return Err(WebSocketError::ServerRejected.new());
 	}
 
 	check_header!(
 		response.headers,
 		"connection",
 		"upgrade",
-		"Expected value 'Upgrade' for header 'Connection'"
+		WebSocketError::ServerRejected.new()
 	);
 
 	check_header!(
 		response.headers,
 		"upgrade",
 		"websocket",
-		"Expected value 'websocket' for header 'Upgrade'"
+		WebSocketError::ServerRejected.new()
 	);
 
 	check_header!(
 		response.headers,
 		"sec-websocket-accept",
 		accept,
-		"Mismatch for header 'Sec-WebSocket-Accept'"
+		WebSocketError::ServerRejected.new()
 	);
 
 	Ok(reader)
@@ -106,8 +103,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap
 	let mut total_size = 0;
 
 	let (line, offset) = read_line_in_place(reader).await?;
-	let (version, url) = parse_request_line(line)
-		.ok_or_else(|| Error::simple(ErrorKind::InvalidData, "Invalid header line"))?;
+	let (version, url) = parse_request_line(line).ok_or_else(|| HttpError::InvalidStatusLine)?;
 
 	total_size += offset;
 	reader.consume(offset);
@@ -125,12 +121,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap
 
 	match (DEFAULT_MAXIMUM_HEADER_SIZE as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, &mut headers, limit, log).await?,
-		None => {
-			return Err(Error::simple(
-				ErrorKind::InvalidData,
-				"Exceeded maximum header size"
-			))
-		}
+		None => return Err(HttpError::HeadersTooLong.new())
 	}
 
 	Ok(headers)
@@ -148,34 +139,26 @@ pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufRea
 		headers,
 		"connection",
 		"upgrade",
-		"Expected value 'Upgrade' for header 'Connection'"
+		WebSocketError::InvalidClientRequest.new()
 	);
 
 	check_header!(
 		headers,
 		"upgrade",
 		"websocket",
-		"Expected value 'websocket' for header 'Upgrade'"
+		WebSocketError::InvalidClientRequest.new()
 	);
 
 	check_header!(
 		headers,
 		"sec-websocket-version",
 		WEB_SOCKET_VERSION,
-		format!(
-			"Expected value '{}' for header 'Sec-WebSocket-Version'",
-			WEB_SOCKET_VERSION
-		)
+		WebSocketError::InvalidClientRequest.new()
 	);
 
 	let key = match headers.get("sec-websocket-key") {
 		Some(key) => key,
-		None => {
-			return Err(Error::simple(
-				ErrorKind::InvalidData,
-				"Sec-WebSocket-Key header is missing"
-			))
-		}
+		None => return Err(WebSocketError::InvalidClientRequest.new())
 	};
 
 	let mut accept_bytes = [0u8; 28];

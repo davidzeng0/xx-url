@@ -18,7 +18,7 @@ pub struct Request {
 impl Request {
 	pub fn new(url: &str) -> Result<Self> {
 		let this = Self {
-			url: Url::parse(url).map_err(Error::map_as_invalid_input)?,
+			url: Url::parse(url).map_err(|_| UrlError::InvalidUrl.new())?,
 			start: None,
 			end: None
 		};

@@ -5,16 +5,18 @@ use std::{
 };
 
 use rustls::ClientConfig;
-use xx_core::{debug, pointer::Ptr};
+use xx_core::debug;
 use xx_pulse::*;
 
 use crate::{dns::Resolver, tls::certs::load_system_certs};
 
+#[derive(Clone)]
 struct GlobalData {
 	dns_resolver: Arc<Resolver>,
 	tls_client_config: Arc<ClientConfig>
 }
 
+#[derive(Clone)]
 struct ThreadLocalData {
 	dns_resolver: Arc<Resolver>,
 	tls_client_config: Arc<ClientConfig>
@@ -60,16 +62,14 @@ fn create_global_data() -> GlobalData {
 	GlobalData { dns_resolver: resolver, tls_client_config: config }
 }
 
-fn get_global_data() -> &'static GlobalData {
+fn get_global_data() -> GlobalData {
 	let mut data = unsafe { &GLOBAL_DATA }.lock().unwrap();
 
 	if let Some(config) = &*data {
-		return unsafe { Ptr::from(config).as_ref() };
+		return config.clone();
 	}
 
-	*data = Some(create_global_data());
-
-	unsafe { Ptr::from((&*data).as_ref().unwrap()).as_ref() }
+	data.insert(create_global_data()).clone()
 }
 
 fn create_thread_local_data() -> ThreadLocalData {
@@ -81,20 +81,14 @@ fn create_thread_local_data() -> ThreadLocalData {
 	}
 }
 
-fn get_data() -> &'static ThreadLocalData {
-	unsafe {
-		THREAD_LOCAL_DATA
-			.with(|data| {
-				if let Some(data) = &*data.borrow() {
-					return Ptr::from(data);
-				}
+fn get_data() -> ThreadLocalData {
+	THREAD_LOCAL_DATA.with(|data| {
+		if let Some(data) = &*data.borrow() {
+			return data.clone();
+		}
 
-				*data.borrow_mut() = Some(create_thread_local_data());
-
-				data.borrow().as_ref().unwrap().into()
-			})
-			.as_ref()
-	}
+		data.borrow_mut().insert(create_thread_local_data()).clone()
+	})
 }
 
 pub fn resolver_conf_path() -> &'static str {
@@ -110,15 +104,17 @@ pub fn root_certs_path() -> &'static str {
 }
 
 pub fn get_tls_client_config() -> Arc<ClientConfig> {
-	get_data().tls_client_config.clone()
+	get_data().tls_client_config
 }
 
 pub fn get_resolver() -> Arc<Resolver> {
-	get_data().dns_resolver.clone()
+	get_data().dns_resolver
 }
 
 pub fn free_data() {
 	unsafe { &GLOBAL_DATA }.lock().unwrap().take();
+
+	THREAD_LOCAL_DATA.take();
 
 	debug!("-- Uninitialized shared data");
 }

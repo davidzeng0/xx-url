@@ -16,6 +16,7 @@ use xx_core::{
 };
 use xx_pulse::*;
 
+use self::error::HttpError;
 use super::{stream::HttpStream, *};
 use crate::{error::UrlError, net::connection::*, tls::connection::TlsConn};
 
@@ -240,15 +241,9 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		}
 
 		return if offset == reader.capacity() {
-			Err(Error::simple(
-				ErrorKind::Other,
-				"Single header line exceeded buffer length"
-			))
+			Err(HttpError::HeadersTooLong.new())
 		} else {
-			Err(Error::simple(
-				ErrorKind::UnexpectedEof,
-				"Stream ended on a header line"
-			))
+			Err(Core::UnexpectedEof.new())
 		};
 	}
 
@@ -321,12 +316,7 @@ pub async fn read_headers_limited<T>(
 
 		match size_limit.checked_sub(read) {
 			Some(new_limit) => size_limit = new_limit,
-			None => {
-				break Err(Error::simple(
-					ErrorKind::InvalidData,
-					"Exceeded maximum header size"
-				))
-			}
+			None => break Err(HttpError::HeadersTooLong.new())
 		}
 
 		let value = value.unwrap_or_else(|| {
@@ -355,10 +345,7 @@ pub async fn parse_response(
 				continue;
 			}
 
-			return Err(Error::simple(
-				ErrorKind::UnexpectedEof,
-				"End of file before a response could be read"
-			));
+			return Err(Core::UnexpectedEof.new());
 		}
 
 		/* unchecked because if it's binary, that's still valid for HTTP/0.9. we only
@@ -369,7 +356,7 @@ pub async fn parse_response(
 	};
 
 	let (version, status) = if !prefix_matches {
-		warn!(target: request, "Invalid header line, assuming HTTP 0.9");
+		warn!(target: request, "Invalid status line, assuming HTTP 0.9");
 
 		Some((Version::Http09, StatusCode::OK))
 	} else {
@@ -380,7 +367,7 @@ pub async fn parse_response(
 		reader.consume(offset);
 		result
 	}
-	.ok_or_else(|| Error::simple(ErrorKind::InvalidData, "Invalid header line"))?;
+	.ok_or_else(|| HttpError::InvalidStatusLine.new())?;
 
 	trace!(target: request, ">> {} {}", version.as_str(), status);
 
@@ -397,12 +384,7 @@ pub async fn parse_response(
 
 	match (request.options.maximum_header_size as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, headers, limit, request).await?,
-		None => {
-			return Err(Error::simple(
-				ErrorKind::InvalidData,
-				"Exceeded maximum header size"
-			))
-		}
+		None => return Err(HttpError::HeadersTooLong.new())
 	}
 
 	Ok((status, version))
@@ -487,10 +469,10 @@ pub async fn transfer(
 
 				/* unborrow to keep compiler happy */
 				url = &request.url;
-				url =
-					redirected_url.insert(url.join(location).map_err(|_| {
-						Error::simple(ErrorKind::InvalidData, "Invalid redirect url")
-					})?);
+				url = redirected_url.insert(
+					url.join(location)
+						.map_err(|_| UrlError::InvalidRedirectUrl.new())?
+				);
 
 				if url.scheme() != request.url.scheme() {
 					return Err(UrlError::RedirectForbidden.new());

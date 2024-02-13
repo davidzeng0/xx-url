@@ -1,4 +1,5 @@
 use std::{
+	cell::Cell,
 	io::{Cursor, IoSlice, Write},
 	net::{SocketAddr, ToSocketAddrs},
 	time::Duration
@@ -135,17 +136,11 @@ impl<'a> Reader<'a> {
 
 		if frame.op.is_control() {
 			if !frame.fin {
-				return Err(Error::simple(
-					ErrorKind::InvalidData,
-					"Fin not set on a control frame"
-				));
+				return Err(WebSocketError::InvalidControlFrame.new());
 			}
 
 			if frame.len > 0x7d {
-				return Err(Error::simple(
-					ErrorKind::InvalidData,
-					"Control frame exceeded maximum size"
-				));
+				return Err(WebSocketError::InvalidControlFrame.new());
 			}
 		} else {
 			if self.web_socket.expect_continuation != (frame.op == Op::Continuation) {
@@ -180,10 +175,7 @@ impl<'a> Reader<'a> {
 				self.web_socket.stream.discard();
 
 				if self.web_socket.stream.fill().await? == 0 {
-					return Err(Error::simple(
-						ErrorKind::UnexpectedEof,
-						"End of file mid frame"
-					));
+					return Err(Core::UnexpectedEof.new());
 				}
 			} else {
 				self.web_socket.stream.consume(header.len as usize);
@@ -210,7 +202,7 @@ impl<'a> Reader<'a> {
 			}
 
 			Err(err) => Err(if err.kind() == ErrorKind::UnexpectedEof {
-				Error::simple(ErrorKind::UnexpectedEof, "End of file mid frame")
+				Core::UnexpectedEof.new()
 			} else {
 				err
 			})
@@ -371,10 +363,7 @@ impl<'a> Writer<'a> {
 			}
 
 			if header.len > 0x7d {
-				return Err(Error::simple(
-					ErrorKind::InvalidInput,
-					"Control frame data too long"
-				));
+				return Err(WebSocketError::UserInvalidControlFrame.new());
 			}
 		} else {
 			if let Some(op) = self.web_socket.last_sent_message_op {
@@ -416,10 +405,7 @@ impl<'a> Writer<'a> {
 			.await?;
 
 		if wrote < header.len() + frame.payload.len() {
-			return Err(Error::simple(
-				ErrorKind::UnexpectedEof,
-				"End of file while writing frame"
-			));
+			return Err(Core::UnexpectedEof.new());
 		}
 
 		if frame.op == Op::Close {
@@ -443,7 +429,7 @@ pub struct WebSocket {
 
 	is_client: bool,
 	expect_continuation: bool,
-	close_state: UnsafeCell<Option<Shutdown>>
+	close_state: Cell<Option<Shutdown>>
 }
 
 #[asynchronous]
@@ -460,7 +446,7 @@ impl WebSocket {
 
 			is_client,
 			expect_continuation: false,
-			close_state: UnsafeCell::new(None)
+			close_state: Cell::new(None)
 		}
 	}
 
@@ -487,30 +473,30 @@ impl WebSocket {
 	pub fn can_read(&self) -> bool {
 		!self
 			.close_state
-			.as_ref()
+			.get()
 			.is_some_and(|state| state != Shutdown::Write)
 	}
 
 	pub fn can_write(&self) -> bool {
 		!self
 			.close_state
-			.as_ref()
+			.get()
 			.is_some_and(|state| state != Shutdown::Read)
 	}
 
 	fn shutdown(&mut self, how: Shutdown) {
 		/* this is the only shared value when split. prevent caching */
-		let close_state = self.close_state.as_mut();
+		let close_state = self.close_state.get();
 
 		match close_state {
-			None => *close_state = Some(how),
-			Some(cur) if *cur == how => (),
-			Some(_) => *close_state = Some(Shutdown::Both)
+			None => self.close_state.set(Some(how)),
+			Some(cur) if cur == how => (),
+			Some(_) => self.close_state.set(Some(Shutdown::Both))
 		}
 	}
 
 	async fn maybe_close(&mut self) -> Result<()> {
-		if self.close_state.as_ref() == &Some(Shutdown::Both) {
+		if self.close_state.get() == Some(Shutdown::Both) {
 			self.stream.inner().shutdown(Shutdown::Write).await?;
 
 			match self
@@ -563,7 +549,7 @@ impl WebSocketHandle {
 		let stream = handle_upgrade(self.stream, &server)
 			.timeout(self.options.handshake_timeout)
 			.await
-			.ok_or_else(|| Error::simple(ErrorKind::TimedOut, "Client handshake timed out"))??;
+			.ok_or_else(|| WebSocketError::HandshakeTimeout.new())??;
 
 		Ok(WebSocket::server(stream, &self.options))
 	}
