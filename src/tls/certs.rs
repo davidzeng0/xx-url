@@ -8,7 +8,7 @@ use log::debug;
 use rustls::RootCertStore;
 use rustls_pemfile::certs;
 
-use crate::env::root_certs_path;
+use super::*;
 
 fn try_load_certs(path: impl AsRef<Path>) -> Result<Vec<Vec<u8>>> {
 	let file = File::open(path)?;

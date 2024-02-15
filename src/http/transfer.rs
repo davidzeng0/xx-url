@@ -4,21 +4,16 @@ use std::{
 	time::{Duration, Instant}
 };
 
-use http::{Method, StatusCode};
 use memchr::memchr;
 use num_traits::FromPrimitive;
-use url::{Position, Url};
+use url::Position;
 use xx_core::{
-	async_std::io::{typed::WriteTyped, *},
-	debug,
-	error::*,
-	trace, warn
+	async_std::io::{typed::*, *},
+	debug, trace, warn
 };
-use xx_pulse::*;
 
-use self::error::HttpError;
-use super::{stream::HttpStream, *};
-use crate::{error::UrlError, net::connection::*, tls::connection::TlsConn};
+use super::*;
+use crate::{net::connection::*, tls::connection::TlsConn};
 
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */
@@ -390,7 +385,7 @@ pub async fn parse_response(
 	Ok((status, version))
 }
 
-pub struct Response {
+pub struct RawResponse {
 	pub stats: Stats,
 	pub version: Version,
 	pub status: StatusCode,
@@ -401,7 +396,7 @@ pub struct Response {
 #[asynchronous]
 pub async fn transfer(
 	request: &Request, connection_pool: Option<()>
-) -> Result<(Response, BufReader<HttpStream>)> {
+) -> Result<(RawResponse, BufReader<HttpStream>)> {
 	let mut url = &request.url;
 
 	let mut redirected_url = None;
@@ -441,7 +436,7 @@ pub async fn transfer(
 			stats.response = start.elapsed();
 
 			(
-				Response {
+				RawResponse {
 					stats,
 					version,
 					status,

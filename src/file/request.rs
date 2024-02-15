@@ -1,18 +1,14 @@
-use url::Url;
 use xx_core::{
 	coroutines::{with_context, Context, Task},
-	error::*,
 	pointer::*
 };
-use xx_pulse::*;
 
-use super::stream::FileStream;
-use crate::error::UrlError;
+use super::*;
 
 pub struct Request {
-	pub(crate) url: Url,
-	pub(crate) start: Option<u64>,
-	pub(crate) end: Option<u64>
+	pub(super) url: Url,
+	pub(super) start: Option<u64>,
+	pub(super) end: Option<u64>
 }
 
 impl Request {

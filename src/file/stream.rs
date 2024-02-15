@@ -1,9 +1,8 @@
 use std::io::SeekFrom;
 
-use xx_core::{async_std::io::*, error::Result, read_into};
-use xx_pulse::*;
+use xx_core::async_std::io::*;
 
-use super::Request;
+use super::*;
 
 pub struct FileStream {
 	file: File,

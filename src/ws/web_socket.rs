@@ -1,33 +1,22 @@
 use std::{
 	cell::Cell,
 	io::{Cursor, IoSlice, Write},
-	net::{SocketAddr, ToSocketAddrs},
-	time::Duration
+	net::{SocketAddr, ToSocketAddrs}
 };
 
 use enumflags2::make_bitflags;
 use num_traits::FromPrimitive;
 use xx_core::{
-	async_std::{
-		io::{typed::BufReadTyped, *},
-		AsyncIterator
-	},
-	coroutines::{with_context, Context, Task},
+	async_std::AsyncIterator,
 	debug,
-	error::*,
-	os::{poll::PollFlag, socket::Shutdown},
-	pointer::*,
-	read_into
+	os::{poll::PollFlag, socket::Shutdown}
 };
-use xx_pulse::{impls::TaskExtensionsExt, *};
 
 use super::{
-	mask,
-	transfer::{connect, handle_upgrade},
-	wire::*,
-	BorrowedFrame, CloseCode, ControlFrame, Frame, WebSocketError, WebSocketOptions, WsRequest
+	transfer::connect,
+	wire::{FrameHeaderPacket, MutableFrameHeaderPacket},
+	*
 };
-use crate::http::stream::HttpStream;
 
 pub struct FrameHeader {
 	fin: bool,

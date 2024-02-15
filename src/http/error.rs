@@ -1,4 +1,4 @@
-use xx_core::error::*;
+use super::*;
 
 #[compact_error]
 pub enum HttpError {

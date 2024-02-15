@@ -1,17 +1,11 @@
 use std::collections::HashMap;
 
-use http::StatusCode;
-use url::Url;
-use xx_core::{async_std::io::ReadExt, coroutines::check_interrupt, error::*};
-use xx_pulse::*;
+use xx_core::coroutines::check_interrupt;
 
-use super::{
-	transfer::{transfer, Response as HttpResponse},
-	*
-};
+use super::*;
 
 pub struct Response {
-	response: HttpResponse,
+	response: RawResponse,
 	body: Body
 }
 

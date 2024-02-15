@@ -1,7 +1,3 @@
-use std::time::Duration;
-
-use resolv_conf::Config as ResolveConfig;
-
 use super::*;
 
 pub struct Config {

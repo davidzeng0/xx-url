@@ -11,21 +11,17 @@ use xx_core::{
 	async_std::io::*,
 	coroutines::{check_interrupt, get_context, with_context, Context},
 	debug,
-	error::*,
 	macros::wrapper_functions,
 	os::{
 		poll::PollFlag,
 		socket::{MessageFlag, Shutdown}
 	},
-	pointer::Ptr,
+	pointer::*,
 	trace
 };
-use xx_pulse::*;
 
-use crate::{
-	env::get_tls_client_config,
-	net::connection::{self, ConnectOptions, Connection}
-};
+use super::*;
+use crate::net::connection::{self, ConnectOptions, Connection};
 
 #[derive(Default)]
 pub struct ConnectStats {

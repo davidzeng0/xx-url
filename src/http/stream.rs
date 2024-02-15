@@ -1,13 +1,10 @@
 use enumflags2::BitFlags;
 use xx_core::{
-	async_std::io::*,
-	error::Result,
 	macros::wrapper_functions,
-	os::{poll::PollFlag, socket::Shutdown},
-	read_wrapper, write_wrapper
+	os::{poll::PollFlag, socket::Shutdown}
 };
-use xx_pulse::*;
 
+use super::*;
 use crate::{net::connection::Connection, tls::connection::TlsConn};
 
 #[asynchronous]

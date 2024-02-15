@@ -1,12 +1,9 @@
 use std::{collections::HashMap, mem::size_of, str::from_utf8_unchecked};
 
-use http::Method;
 use memchr::memchr;
-use xx_core::{async_std::io::*, error::*, opt::hint::*, read_into, warn};
-use xx_pulse::*;
+use xx_core::warn;
 
-use super::{stream::HttpStream, transfer::*};
-use crate::error::UrlError;
+use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ChunkedState {
@@ -42,8 +39,8 @@ pub struct Body {
 
 #[asynchronous]
 impl Body {
-	pub(crate) fn new(
-		reader: BufReader<HttpStream>, request: &Request, response: &Response
+	pub(super) fn new(
+		reader: BufReader<HttpStream>, request: &Request, response: &RawResponse
 	) -> Result<Self> {
 		let mut body = Self {
 			reader,

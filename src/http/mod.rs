@@ -1,12 +1,24 @@
-pub mod body;
-pub mod error;
-pub mod request;
-pub mod response;
-pub mod stats;
-pub(crate) mod stream;
-pub(crate) mod transfer;
-
+use ::http::{Method, StatusCode};
 use num_derive::FromPrimitive;
+use xx_core::{async_std::io::*, opt::hint::*};
+
+use super::*;
+
+pub mod body;
+pub use body::*;
+pub mod error;
+pub use error::*;
+pub mod request;
+pub use request::*;
+pub mod response;
+pub use response::*;
+pub mod stats;
+pub use stats::*;
+
+pub(crate) mod stream;
+use stream::*;
+pub(crate) mod transfer;
+use transfer::*;
 
 #[derive(FromPrimitive, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
 pub enum Version {
@@ -28,8 +40,3 @@ impl Version {
 		}
 	}
 }
-
-pub use body::*;
-pub use request::*;
-pub use response::*;
-pub use stats::*;

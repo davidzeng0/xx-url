@@ -10,21 +10,17 @@ use xx_core::{
 	async_std::io::*,
 	coroutines::check_interrupt,
 	debug,
-	error::*,
 	macros::wrapper_functions,
 	os::{
 		inet::IpProtocol,
 		poll::{poll, BorrowedPollFd, PollFlag},
 		socket::{Shutdown, SocketType}
-	},
-	read_wrapper, write_wrapper
+	}
 };
-use xx_pulse::{impls::TaskExtensionsExt, *};
+use xx_pulse::impls::TaskExtensionsExt;
 
-use crate::{
-	dns::{LookupIp, Resolver},
-	env::get_resolver
-};
+use super::*;
+use crate::dns::{LookupIp, Resolver};
 
 #[derive(Default, Clone)]
 pub struct ConnectStats {

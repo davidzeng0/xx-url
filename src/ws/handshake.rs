@@ -1,8 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use crypto::{digest::Digest, sha1::Sha1};
-use xx_core::error::*;
 
-use super::{consts::WEB_SOCKET_GUID, WebSocketError};
+use super::*;
 
 pub struct Key {
 	data: [u8; 16]

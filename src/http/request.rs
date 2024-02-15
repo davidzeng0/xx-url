@@ -1,17 +1,14 @@
 use std::time::Duration;
 
-use http::Method;
-use url::Url;
 use xx_core::{
 	coroutines::{with_context, Context, Task},
-	error::*,
 	macros::wrapper_functions,
 	pointer::*
 };
-use xx_pulse::*;
 
-use super::{transfer::Request, Response};
-use crate::{error::UrlError, net::connection::IpStrategy};
+use super::*;
+use crate::net::connection::IpStrategy;
+
 pub struct HttpRequest {
 	pub(super) inner: Request
 }

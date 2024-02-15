@@ -1,4 +1,25 @@
+use std::{
+	collections::HashMap,
+	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+	str::FromStr,
+	time::{Duration, Instant}
+};
+
+use hickory_proto::{
+	error::ProtoError,
+	op::*,
+	rr::{rdata::SOA, resource::RecordRef, *},
+	serialize::binary::BinDecodable,
+	xfer::DnsResponse
+};
+use resolv_conf::Config as ResolveConfig;
 use thiserror::Error;
+use xx_core::{
+	async_std::{io::*, AsyncIteratorExt},
+	macros::duration
+};
+
+use super::*;
 
 mod config;
 pub use config::*;
@@ -9,21 +30,7 @@ pub use lookup::*;
 mod name_server;
 pub use name_server::*;
 mod resolver;
-use hickory_proto::{
-	error::ProtoError,
-	op::*,
-	rr::{rdata::SOA, resource::RecordRef, *},
-	serialize::binary::BinDecodable,
-	xfer::DnsResponse
-};
 pub use resolver::*;
-use xx_core::{
-	async_std::{io::*, AsyncIteratorExt},
-	error::*
-};
-use xx_pulse::*;
-
-use crate::env::*;
 
 #[derive(Debug, Error)]
 pub enum DnsError {

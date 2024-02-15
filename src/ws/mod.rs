@@ -1,19 +1,36 @@
-pub mod web_socket;
-use std::{fmt, str::from_utf8};
+use std::{fmt, str::from_utf8, time::Duration};
 
+use ::http::{Method, StatusCode};
 use num_derive::FromPrimitive;
+use xx_core::{
+	async_std::io::{
+		typed::{BufReadTyped, WriteTyped},
+		*
+	},
+	coroutines::*,
+	macros::*,
+	pointer::*
+};
+use xx_pulse::impls::TaskExtensionsExt;
+
+use super::*;
+use crate::http::{stream::HttpStream, transfer::Request, HttpError, Version};
+
+mod web_socket;
 pub use web_socket::*;
-pub mod request;
-pub use request::*;
-pub mod errors;
+mod request;
+pub use request::{open, *};
+mod errors;
 pub use errors::*;
 
-use self::wire::Op;
-
 mod consts;
+use consts::*;
 mod handshake;
+use handshake::*;
 mod transfer;
+use transfer::*;
 mod wire;
+use wire::Op;
 
 #[repr(u16)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]

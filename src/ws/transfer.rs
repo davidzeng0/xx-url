@@ -1,15 +1,9 @@
 use std::{collections::HashMap, str::from_utf8};
 
-use http::{Method, StatusCode};
-use xx_core::{
-	async_std::io::{typed::WriteTyped, *},
-	error::*,
-	trace
-};
-use xx_pulse::{impls::TaskExtensionsExt, *};
+use xx_core::trace;
 
-use super::{consts::*, handshake::Key, WebSocketError, WsRequest};
-use crate::http::{error::HttpError, stream::HttpStream, transfer::*, Version};
+use super::*;
+use crate::http::transfer::*;
 
 macro_rules! check_header {
 	($headers: expr, $header: literal, $value: expr, $error: expr) => {

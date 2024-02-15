@@ -1,6 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
-
-use xx_core::{macros::duration, trace};
+use xx_core::trace;
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;

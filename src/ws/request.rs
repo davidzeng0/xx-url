@@ -1,25 +1,13 @@
-use std::time::Duration;
-
-use http::Method;
-use url::Url;
-use xx_core::{
-	coroutines::{with_context, Context, Task},
-	error::*,
-	macros::{duration, wrapper_functions},
-	pointer::*
-};
-use xx_pulse::*;
-
-use super::WebSocket;
-use crate::{error::UrlError, http::transfer::Request, net::connection::IpStrategy};
+use super::*;
+use crate::net::connection::IpStrategy;
 
 const DEFAULT_MAX_MESSAGE_LENGTH: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 pub struct WebSocketOptions {
-	pub(crate) handshake_timeout: Duration,
-	pub(crate) max_message_length: u64,
-	pub(crate) close_timeout: Duration
+	pub(super) handshake_timeout: Duration,
+	pub(super) max_message_length: u64,
+	pub(super) close_timeout: Duration
 }
 
 impl WebSocketOptions {
@@ -48,8 +36,8 @@ impl WebSocketOptions {
 }
 
 pub struct WsRequest {
-	pub(crate) inner: Request,
-	pub(crate) options: WebSocketOptions
+	pub(super) inner: Request,
+	pub(super) options: WebSocketOptions
 }
 
 #[asynchronous]

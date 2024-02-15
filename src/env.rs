@@ -6,8 +6,8 @@ use std::{
 
 use rustls::ClientConfig;
 use xx_core::debug;
-use xx_pulse::*;
 
+use super::*;
 use crate::{dns::Resolver, tls::certs::load_system_certs};
 
 #[derive(Clone)]
