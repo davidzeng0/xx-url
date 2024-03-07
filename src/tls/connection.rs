@@ -166,14 +166,20 @@ impl TlsConn {
 
 			match (eof, handshaking, self.tls.is_handshaking()) {
 				(_, true, false) | (_, false, _) => break,
-				(true, true, true) => return Err(Core::UnexpectedEof.new()),
+				(true, true, true) => return Err(Core::UnexpectedEof.as_err()),
 				(..) => ()
 			}
 		}
 
 		let elapsed = now.elapsed();
 
-		debug!(target: self, "== TLS connected using {:?} / {:?} ({:.3} ms)", self.tls.protocol_version().unwrap(), self.tls.negotiated_cipher_suite().unwrap(), elapsed.as_secs_f32() * 1000.0);
+		debug!(
+			target: self,
+			"== TLS connected using {:?} / {:?} ({:.3} ms)",
+			self.tls.protocol_version().unwrap(),
+			self.tls.negotiated_cipher_suite().unwrap(),
+			elapsed.as_secs_f32() * 1000.0
+		);
 
 		if let Some((_, cert)) = self
 			.tls
@@ -182,14 +188,14 @@ impl TlsConn {
 			.and_then(|cert| X509Certificate::from_der(&cert.0).ok())
 		{
 			trace!(target: self, "== Certificate: ");
-			trace!(target: self, "==     Subject: {}", cert.subject());
-			trace!(target: self, "==     Issuer : {}", cert.issuer());
-			trace!(target: self, "==     Start  : {}", cert.validity().not_before);
-			trace!(target: self, "==     Expire : {}", cert.validity().not_after);
+			trace!(target: self, "::     Subject: {}", cert.subject());
+			trace!(target: self, "::     Issuer : {}", cert.issuer());
+			trace!(target: self, "::     Start  : {}", cert.validity().not_before);
+			trace!(target: self, "::     Expire : {}", cert.validity().not_after);
 
 			if let Ok(Some(alt)) = cert.subject_alternative_name() {
 				for name in &alt.value.general_names {
-					trace!(target: self, "==     Alt    : {}", name);
+					trace!(target: self, "::     Alt    : {}", name);
 				}
 			}
 		}

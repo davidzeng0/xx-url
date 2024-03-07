@@ -28,6 +28,11 @@ thread_local! {
 	static THREAD_LOCAL_DATA: RefCell<Option<ThreadLocalData>> = RefCell::new(None);
 }
 
+#[main]
+async fn create_resolver() -> Result<Resolver> {
+	Resolver::new().await
+}
+
 fn create_global_data() -> GlobalData {
 	let start = Instant::now();
 
@@ -44,15 +49,7 @@ fn create_global_data() -> GlobalData {
 		)
 	};
 
-	let resolver = {
-		let mut runtime = Runtime::new().expect("Failed to create runtime");
-
-		Arc::new(
-			runtime
-				.block_on(Resolver::new())
-				.expect("Failed to initialize DNS resolver")
-		)
-	};
+	let resolver = Arc::new(create_resolver().expect("Failed to initialize DNS resolver"));
 
 	debug!(
 		"== Initialized shared data in {:.3} ms",

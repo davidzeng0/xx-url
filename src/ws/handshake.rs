@@ -13,15 +13,13 @@ impl Key {
 	}
 
 	pub fn from(val: &str) -> Result<Self> {
-		let mut data = [0u8; 18];
+		let mut data = [0u8; 16];
 
-		let decoded_len = STANDARD.decode_slice(val.as_bytes(), &mut data);
+		STANDARD
+			.decode_slice(val.as_bytes(), &mut data)
+			.map_err(|_| WebSocketError::InvalidKey.as_err())?;
 
-		if !decoded_len.is_ok_and(|len| len == 16) {
-			return Err(WebSocketError::InvalidKey.new());
-		}
-
-		Ok(Self { data: data[..16].try_into().unwrap() })
+		Ok(Self { data })
 	}
 
 	pub fn encode(&self, out: &mut [u8; 24]) {

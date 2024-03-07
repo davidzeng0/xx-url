@@ -14,13 +14,13 @@ pub struct Request {
 impl Request {
 	pub fn new(url: &str) -> Result<Self> {
 		let this = Self {
-			url: Url::parse(url).map_err(|_| UrlError::InvalidUrl.new())?,
+			url: Url::parse(url).map_err(|_| UrlError::InvalidUrl.as_err())?,
 			start: None,
 			end: None
 		};
 
 		if this.url.scheme() != "file" {
-			return Err(UrlError::InvalidScheme.new());
+			return Err(UrlError::InvalidScheme.as_err());
 		}
 
 		Ok(this)

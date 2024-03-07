@@ -110,7 +110,7 @@ impl Resolver {
 		match name.parse() {
 			Err(_) => (),
 			Ok(addr) => {
-				debug!(target: self, "== Addr {}", addr);
+				debug!(target: self, "@@ Ip: {}", addr);
 
 				return Ok(LookupIp::from_ip(addr));
 			}

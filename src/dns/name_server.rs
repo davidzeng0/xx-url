@@ -46,7 +46,7 @@ impl NameServer {
 		self.get_matching_message(&socket, message.id())
 			.timeout(duration!(5 s))
 			.await
-			.ok_or_else(|| UrlError::DnsTimedOut.new())?
+			.ok_or_else(|| UrlError::DnsTimedOut.as_err())?
 	}
 }
 

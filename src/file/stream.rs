@@ -16,7 +16,7 @@ impl FileStream {
 		let mut file = File::open(request.url.path()).await?;
 
 		let mut start = 0;
-		let mut end = file.len();
+		let mut end = file.stream_len().await?;
 
 		if let Some(pos) = request.start {
 			start = pos.min(end);

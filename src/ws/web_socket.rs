@@ -107,7 +107,7 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
 	pub async fn read_frame_header(&mut self) -> Result<Option<FrameHeader>> {
 		if !self.web_socket.can_read() {
-			return Err(Core::Shutdown.new());
+			return Err(Core::Shutdown.as_err());
 		}
 
 		let frame = match FrameHeader::read(&mut self.web_socket.stream).await? {
@@ -120,23 +120,26 @@ impl<'a> Reader<'a> {
 		};
 
 		if frame.op == Op::Invalid {
-			return Err(WebSocketError::InvalidOpcode.new());
+			return Err(WebSocketError::InvalidOpcode.as_err());
 		}
 
 		if frame.op.is_control() {
 			if !frame.fin {
-				return Err(WebSocketError::InvalidControlFrame.new());
+				return Err(WebSocketError::InvalidControlFrame
+					.as_err_with_msg("Fin not set on control frame"));
 			}
 
 			if frame.len > 0x7d {
-				return Err(WebSocketError::InvalidControlFrame.new());
+				return Err(
+					WebSocketError::InvalidControlFrame.as_err_with_msg("Control frame too long")
+				);
 			}
 		} else {
 			if self.web_socket.expect_continuation != (frame.op == Op::Continuation) {
 				if self.web_socket.expect_continuation {
-					return Err(WebSocketError::ExpectedContinuation.new());
+					return Err(WebSocketError::ExpectedContinuation.as_err());
 				} else {
-					return Err(WebSocketError::UnexpectedContinuation.new());
+					return Err(WebSocketError::UnexpectedContinuation.as_err());
 				}
 			}
 
@@ -144,7 +147,7 @@ impl<'a> Reader<'a> {
 		}
 
 		if frame.mask.is_some() && self.web_socket.is_client {
-			return Err(WebSocketError::ServerMasked.new());
+			return Err(WebSocketError::ServerMasked.as_err());
 		}
 
 		if frame.op == Op::Close {
@@ -164,7 +167,7 @@ impl<'a> Reader<'a> {
 				self.web_socket.stream.discard();
 
 				if self.web_socket.stream.fill().await? == 0 {
-					return Err(Core::UnexpectedEof.new());
+					return Err(Core::UnexpectedEof.as_err());
 				}
 			} else {
 				self.web_socket.stream.consume(header.len as usize);
@@ -191,7 +194,7 @@ impl<'a> Reader<'a> {
 			}
 
 			Err(err) => Err(if err.kind() == ErrorKind::UnexpectedEof {
-				Core::UnexpectedEof.new()
+				Core::UnexpectedEof.as_err()
 			} else {
 				err
 			})
@@ -268,7 +271,7 @@ impl<'a> Frames<'a> {
 				.max_message_length
 				.checked_sub(buf.len() as u64)
 				.and_then(|len| len.checked_sub(frame.len))
-				.ok_or_else(|| WebSocketError::MessageTooLong.new())?;
+				.ok_or_else(|| WebSocketError::MessageTooLong.as_err())?;
 			buf.reserve(frame.len as usize);
 
 			unsafe {
@@ -293,7 +296,7 @@ impl<'a> Frames<'a> {
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
 					Op::Text => {
-						Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8.new())?)
+						Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8.as_err())?)
 					}
 					_ => unreachable!()
 				})
@@ -331,7 +334,7 @@ pub struct Writer<'a> {
 impl<'a> Writer<'a> {
 	pub async fn send_frame<'b>(&mut self, frame: impl Into<BorrowedFrame<'b>>) -> Result<()> {
 		if !self.web_socket.can_write() {
-			return Err(Core::Shutdown.new());
+			return Err(Core::Shutdown.as_err());
 		}
 
 		let frame = frame.into();
@@ -352,12 +355,12 @@ impl<'a> Writer<'a> {
 			}
 
 			if header.len > 0x7d {
-				return Err(WebSocketError::UserInvalidControlFrame.new());
+				return Err(WebSocketError::UserInvalidControlFrame.as_err());
 			}
 		} else {
 			if let Some(op) = self.web_socket.last_sent_message_op {
 				if op != header.op {
-					return Err(WebSocketError::DataTypeMismatch.new());
+					return Err(WebSocketError::DataTypeMismatch.as_err());
 				}
 
 				header.op = Op::Continuation;
@@ -394,7 +397,7 @@ impl<'a> Writer<'a> {
 			.await?;
 
 		if wrote < header.len() + frame.payload.len() {
-			return Err(Core::UnexpectedEof.new());
+			return Err(Core::UnexpectedEof.as_err());
 		}
 
 		if frame.op == Op::Close {
@@ -538,7 +541,7 @@ impl WebSocketHandle {
 		let stream = handle_upgrade(self.stream, &server)
 			.timeout(self.options.handshake_timeout)
 			.await
-			.ok_or_else(|| WebSocketError::HandshakeTimeout.new())??;
+			.ok_or_else(|| WebSocketError::HandshakeTimeout.as_err())??;
 
 		Ok(WebSocket::server(stream, &self.options))
 	}

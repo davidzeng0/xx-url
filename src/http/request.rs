@@ -53,14 +53,14 @@ impl Task for HttpRequest {
 
 fn new_request(url: &str, method: Method) -> Result<HttpRequest> {
 	let mut request = Request::new(
-		Url::parse(url).map_err(|_| UrlError::InvalidUrl.new())?,
+		Url::parse(url).map_err(|_| UrlError::InvalidUrl.as_err())?,
 		method
 	);
 
 	match request.url.scheme() {
 		"http" => (),
 		"https" => request.options.secure = true,
-		_ => return Err(UrlError::InvalidScheme.new())
+		_ => return Err(UrlError::InvalidScheme.as_err())
 	}
 
 	Ok(HttpRequest { inner: request })

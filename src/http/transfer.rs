@@ -236,9 +236,9 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		}
 
 		return if offset == reader.capacity() {
-			Err(HttpError::HeadersTooLong.new())
+			Err(HttpError::HeadersTooLong.as_err())
 		} else {
-			Err(Core::UnexpectedEof.new())
+			Err(Core::UnexpectedEof.as_err())
 		};
 	}
 
@@ -311,7 +311,7 @@ pub async fn read_headers_limited<T>(
 
 		match size_limit.checked_sub(read) {
 			Some(new_limit) => size_limit = new_limit,
-			None => break Err(HttpError::HeadersTooLong.new())
+			None => break Err(HttpError::HeadersTooLong.as_err())
 		}
 
 		let value = value.unwrap_or_else(|| {
@@ -340,7 +340,7 @@ pub async fn parse_response(
 				continue;
 			}
 
-			return Err(Core::UnexpectedEof.new());
+			return Err(Core::UnexpectedEof.as_err());
 		}
 
 		/* unchecked because if it's binary, that's still valid for HTTP/0.9. we only
@@ -362,14 +362,14 @@ pub async fn parse_response(
 		reader.consume(offset);
 		result
 	}
-	.ok_or_else(|| HttpError::InvalidStatusLine.new())?;
+	.ok_or_else(|| HttpError::InvalidStatusLine.as_err())?;
 
 	trace!(target: request, ">> {} {}", version.as_str(), status);
 
 	if version < request.options.min_version || version > request.options.max_version {
 		return Err(Error::simple(
 			ErrorKind::InvalidData,
-			format!("Unexpected version {}", version.as_str())
+			Some(format!("Unexpected version {}", version.as_str()))
 		));
 	}
 
@@ -379,7 +379,7 @@ pub async fn parse_response(
 
 	match (request.options.maximum_header_size as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, headers, limit, request).await?,
-		None => return Err(HttpError::HeadersTooLong.new())
+		None => return Err(HttpError::HeadersTooLong.as_err())
 	}
 
 	Ok((status, version))
@@ -466,11 +466,11 @@ pub async fn transfer(
 				url = &request.url;
 				url = redirected_url.insert(
 					url.join(location)
-						.map_err(|_| UrlError::InvalidRedirectUrl.new())?
+						.map_err(|_| UrlError::InvalidRedirectUrl.as_err())?
 				);
 
 				if url.scheme() != request.url.scheme() {
-					return Err(UrlError::RedirectForbidden.new());
+					return Err(UrlError::RedirectForbidden.as_err());
 				}
 
 				response_headers = response.headers;

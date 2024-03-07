@@ -102,7 +102,7 @@ pub fn open(url: &str) -> Result<WsRequest> {
 	match request.url.scheme() {
 		"ws" => (),
 		"wss" => request.options.secure = true,
-		_ => return Err(UrlError::InvalidScheme.new())
+		_ => return Err(UrlError::InvalidScheme.as_err())
 	}
 
 	Ok(WsRequest { inner: request, options: WebSocketOptions::new() })

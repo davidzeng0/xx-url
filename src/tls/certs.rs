@@ -4,9 +4,9 @@ use std::{
 	path::Path
 };
 
-use log::debug;
 use rustls::RootCertStore;
 use rustls_pemfile::certs;
+use xx_core::debug;
 
 use super::*;
 
@@ -49,7 +49,7 @@ pub fn load_system_certs() -> Result<RootCertStore> {
 
 	try_load_ca_path(path, &mut root_store)?;
 
-	debug!(target: "Root Cert", "== Loaded certificates from {}", path);
+	debug!(target: &root_store, "== Loaded certificates from {}", path);
 
 	Ok(root_store)
 }

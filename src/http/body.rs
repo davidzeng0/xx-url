@@ -70,7 +70,7 @@ impl Body {
 				Err(err) => {
 					return Err(Error::simple(
 						ErrorKind::InvalidData,
-						format!("Invalid content length: {}", err.to_string())
+						Some(format!("Invalid content length: {}", err.to_string()))
 					))
 				}
 			}
@@ -114,7 +114,7 @@ impl Body {
 
 			/* fill does not discard unconsumed bytes */
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(UrlError::PartialFile.new());
+				return Err(UrlError::PartialFile.as_err());
 			}
 		};
 
@@ -126,7 +126,7 @@ impl Body {
 		} else {
 			None
 		}
-		.ok_or_else(|| Error::simple(ErrorKind::InvalidData, "Chunk size overflowed"))?;
+		.ok_or_else(|| Error::simple(ErrorKind::InvalidData, Some("Chunk size overflowed")))?;
 
 		/* index can't be negative here */
 		self.reader.consume(index as usize);
@@ -147,7 +147,7 @@ impl Body {
 			};
 
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(UrlError::PartialFile.new());
+				return Err(UrlError::PartialFile.as_err());
 			}
 		}
 
@@ -177,7 +177,7 @@ impl Body {
 					let read = self.read_bytes(buf).await?;
 
 					if unlikely(read == 0) {
-						return Err(UrlError::PartialFile.new());
+						return Err(UrlError::PartialFile.as_err());
 					}
 
 					remaining -= read as u64;
@@ -208,8 +208,10 @@ impl Body {
 		if self.transfer != Transfer::Trailers {
 			return Err(Error::simple(
 				ErrorKind::Other,
-				"Invalid state: either there is data left in the body or the stream has been \
-				 exhausted"
+				Some(
+					"Invalid state: either there is data left in the body or the stream has been \
+					 exhausted"
+				)
 			));
 		}
 
@@ -289,7 +291,7 @@ impl Read for Body {
 				let read = self.read_bytes(buf).await?;
 
 				if unlikely(read == 0) {
-					return Err(UrlError::PartialFile.new());
+					return Err(UrlError::PartialFile.as_err());
 				}
 
 				remaining -= read as u64;

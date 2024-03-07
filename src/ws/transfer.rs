@@ -49,31 +49,31 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 	let (response, reader) = transfer(&request, None)
 		.timeout(timeout)
 		.await
-		.ok_or_else(|| WebSocketError::HandshakeTimeout.new())??;
+		.ok_or_else(|| WebSocketError::HandshakeTimeout.as_err())??;
 
 	if response.status != StatusCode::SWITCHING_PROTOCOLS {
-		return Err(WebSocketError::ServerRejected.new());
+		return Err(WebSocketError::ServerRejected.as_err());
 	}
 
 	check_header!(
 		response.headers,
 		"connection",
 		"upgrade",
-		WebSocketError::ServerRejected.new()
+		WebSocketError::ServerRejected.as_err()
 	);
 
 	check_header!(
 		response.headers,
 		"upgrade",
 		"websocket",
-		WebSocketError::ServerRejected.new()
+		WebSocketError::ServerRejected.as_err()
 	);
 
 	check_header!(
 		response.headers,
 		"sec-websocket-accept",
 		accept,
-		WebSocketError::ServerRejected.new()
+		WebSocketError::ServerRejected.as_err()
 	);
 
 	Ok(reader)
@@ -107,7 +107,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap
 	if version != Version::Http11 {
 		return Err(Error::simple(
 			ErrorKind::InvalidData,
-			format!("Unexpected version {}", version.as_str())
+			Some(format!("Unexpected version {}", version.as_str()))
 		));
 	}
 
@@ -115,7 +115,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap
 
 	match (DEFAULT_MAXIMUM_HEADER_SIZE as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, &mut headers, limit, log).await?,
-		None => return Err(HttpError::HeadersTooLong.new())
+		None => return Err(HttpError::HeadersTooLong.as_err())
 	}
 
 	Ok(headers)
@@ -133,26 +133,26 @@ pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufRea
 		headers,
 		"connection",
 		"upgrade",
-		WebSocketError::InvalidClientRequest.new()
+		WebSocketError::InvalidClientRequest.as_err()
 	);
 
 	check_header!(
 		headers,
 		"upgrade",
 		"websocket",
-		WebSocketError::InvalidClientRequest.new()
+		WebSocketError::InvalidClientRequest.as_err()
 	);
 
 	check_header!(
 		headers,
 		"sec-websocket-version",
 		WEB_SOCKET_VERSION,
-		WebSocketError::InvalidClientRequest.new()
+		WebSocketError::InvalidClientRequest.as_err()
 	);
 
 	let key = match headers.get("sec-websocket-key") {
 		Some(key) => key,
-		None => return Err(WebSocketError::InvalidClientRequest.new())
+		None => return Err(WebSocketError::InvalidClientRequest.as_err())
 	};
 
 	let mut accept_bytes = [0u8; 28];
