@@ -8,24 +8,29 @@ pub struct LookupResults {
 }
 
 impl LookupResults {
-	pub fn new(query: Query, records: Vec<Record>, valid_until: Option<Instant>) -> Self {
+	#[must_use]
+	pub const fn new(query: Query, records: Vec<Record>, valid_until: Option<Instant>) -> Self {
 		Self { query, records, valid_until }
 	}
 
-	pub fn records(&self) -> &Vec<Record> {
+	#[must_use]
+	pub const fn records(&self) -> &Vec<Record> {
 		&self.records
 	}
 
+	#[must_use]
 	pub fn records_mut(&mut self) -> &mut Vec<Record> {
 		&mut self.records
 	}
 
-	pub fn query(&self) -> &Query {
+	#[must_use]
+	pub const fn query(&self) -> &Query {
 		&self.query
 	}
 
-	pub fn valid_until(&self) -> Option<Instant> {
-		self.valid_until.clone()
+	#[must_use]
+	pub const fn valid_until(&self) -> Option<Instant> {
+		self.valid_until
 	}
 }
 

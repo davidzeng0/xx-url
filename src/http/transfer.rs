@@ -1,16 +1,8 @@
-use std::{
-	collections::HashMap,
-	str::{from_utf8, from_utf8_unchecked, FromStr},
-	time::{Duration, Instant}
-};
+#![allow(unreachable_pub)]
 
-use memchr::memchr;
-use num_traits::FromPrimitive;
+use std::str::{from_utf8, FromStr};
+
 use url::Position;
-use xx_core::{
-	async_std::io::{typed::*, *},
-	debug, trace, warn
-};
 
 use super::*;
 use crate::{net::connection::*, tls::connection::TlsConn};
@@ -18,10 +10,11 @@ use crate::{net::connection::*, tls::connection::TlsConn};
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */
 const REDIRECT_REUSE_THRESHOLD: u64 = 4 * 1024;
-pub(crate) const DEFAULT_MAXIMUM_HEADER_SIZE: u32 = 128 * 1024;
+
+pub const DEFAULT_MAXIMUM_HEADER_SIZE: u32 = 128 * 1024;
 
 #[derive(Clone)]
-pub(crate) struct Options {
+pub struct Options {
 	/* connect options */
 	pub port: u16,
 	pub strategy: IpStrategy,
@@ -38,7 +31,8 @@ pub(crate) struct Options {
 }
 
 impl Options {
-	pub fn new() -> Self {
+	#[must_use]
+	pub const fn new() -> Self {
 		Self {
 			port: 0,
 			strategy: IpStrategy::Default,
@@ -55,31 +49,31 @@ impl Options {
 	}
 }
 
-#[derive(Clone)]
 pub struct Request {
-	pub(crate) url: Url,
+	pub(crate) options: Options,
+	pub(crate) request: RequestBase,
 	pub(crate) method: Method,
-	pub(crate) headers: HashMap<String, String>,
-
-	pub(crate) options: Options
+	pub(crate) headers: Headers
 }
 
 impl Request {
-	pub(crate) fn new(url: Url, method: Method) -> Self {
+	pub(crate) fn new(request: RequestBase, method: Method) -> Self {
 		Self {
-			url,
+			options: Options::new(),
+			request,
 			method,
-			headers: HashMap::new(),
-			options: Options::new()
+			headers: Headers::new()
 		}
 	}
 
-	pub fn header(&mut self, key: impl ToString, value: impl ToString) -> &mut Self {
-		let mut key = key.to_string();
+	#[allow(clippy::impl_trait_in_params, clippy::needless_pass_by_value)]
+	pub fn header(
+		&mut self, key: impl TryIntoHeaderName, value: impl TryIntoHeaderValue
+	) -> &mut Self {
+		if let Err(err) = self.headers.insert(key, value) {
+			self.request.fail(err);
+		}
 
-		key.make_ascii_lowercase();
-
-		self.headers.insert(key, value.to_string());
 		self
 	}
 
@@ -130,7 +124,8 @@ async fn get_connection_for(
 	let mut options = ConnectOptions::new(
 		url.host_str().unwrap(),
 		url.port().unwrap_or(request.options.port)
-	);
+	)
+	.await;
 
 	options.set_strategy(request.options.strategy);
 	options.set_timeout(request.options.timeout);
@@ -167,17 +162,16 @@ async fn get_connection_for(
 }
 
 #[asynchronous]
+#[allow(clippy::impl_trait_in_params)]
 pub async fn send_request(
 	writer: &mut impl Write, request: &Request, url: &Url, version: Version
 ) -> Result<()> {
 	macro_rules! http_write {
-		($writer: expr, $($arg: tt)*) => {
-			{
-				trace!(target: request, "<< {}", format_args!($($arg)*));
+		($writer: expr, $($arg: tt)*) => {{
+			trace!(target: request, "<< {}", format_args!($($arg)*));
 
-				$writer.write_fmt(format_args!("{}\r\n", format_args!($($arg)*)))
-			}
-		};
+			$writer.write_fmt(format_args!("{}\r\n", format_args!($($arg)*)))
+		}};
 	}
 
 	let path = &url[Position::BeforePath..Position::AfterQuery];
@@ -197,14 +191,12 @@ pub async fn send_request(
 		}
 	}?;
 
-	if version <= Version::Http11 {
-		if !request.headers.contains_key("host") {
-			http_write!(writer, "host: {}", url.host_str().unwrap()).await?;
-		}
-	}
-
 	for (key, value) in &request.headers {
-		http_write!(writer, "{}: {}", key, value).await?;
+		trace!(target: request, "<< {}: {}", key.as_str(), value.to_str().unwrap_or("<binary>"));
+
+		writer.write_fmt(format_args!("{}: ", key.as_str())).await?;
+		writer.write_exact(value.as_bytes()).await?;
+		writer.write_string_all_or_err("\r\n").await?;
 	}
 
 	writer.write_string("\r\n").await?;
@@ -214,18 +206,21 @@ pub async fn send_request(
 }
 
 #[asynchronous]
+#[allow(clippy::impl_trait_in_params)]
 pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usize)> {
 	let mut offset = 0;
 
 	loop {
 		let available = reader.buffer();
 
+		#[allow(clippy::arithmetic_side_effects)]
 		let (used, done) = match memchr(b'\n', &available[offset..]) {
 			Some(index) => (index + 1, true),
 			None => (available.len(), false)
 		};
 
-		offset += used;
+		#[allow(clippy::arithmetic_side_effects)]
+		(offset += used);
 
 		if done {
 			break;
@@ -236,9 +231,9 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		}
 
 		return if offset == reader.capacity() {
-			Err(HttpError::HeadersTooLong.as_err())
+			Err(HttpError::HeadersTooLong.into())
 		} else {
-			Err(Core::UnexpectedEof.as_err())
+			Err(Core::UnexpectedEof.into())
 		};
 	}
 
@@ -263,6 +258,7 @@ pub fn parse_version(version: &str) -> Option<Version> {
 	let major = (version.as_bytes()[5] as char).to_digit(10)?;
 	let minor = (version.as_bytes()[7] as char).to_digit(10)?;
 
+	#[allow(clippy::arithmetic_side_effects)]
 	Version::from_u32(major * 10 + minor)
 }
 
@@ -274,21 +270,26 @@ fn parse_status_line(line: &str) -> Option<(Version, StatusCode)> {
 }
 
 #[asynchronous]
+#[allow(clippy::impl_trait_in_params)]
 pub async fn read_header_line_limited(
 	reader: &mut impl BufRead
-) -> Result<Option<(String, Option<String>, usize)>> {
+) -> Result<Option<(HeaderName, Option<HeaderValue>, usize)>> {
 	let (line, offset) = read_line_in_place(reader).await?;
 
 	let result = if line.is_empty() {
 		None
 	} else {
-		let (key, value) = match line.split_once(":") {
+		let (key, value) = match line.split_once(':') {
 			Some((key, value)) => (key, Some(value)),
 			None => (line, None)
 		};
 
-		let key = key.trim().to_ascii_lowercase();
-		let value = value.map(|value| value.trim_start().to_string());
+		let key = key.trim().try_into_name()?;
+		let value = if let Some(value) = value {
+			Some(value.trim_start().try_into_value()?)
+		} else {
+			None
+		};
 
 		Some((key, value, offset))
 	};
@@ -299,9 +300,9 @@ pub async fn read_header_line_limited(
 }
 
 #[asynchronous]
+#[allow(clippy::impl_trait_in_params)]
 pub async fn read_headers_limited<T>(
-	reader: &mut impl BufRead, headers: &mut HashMap<String, String>, mut size_limit: usize,
-	log: &T
+	reader: &mut impl BufRead, headers: &mut Headers, mut size_limit: usize, log: &T
 ) -> Result<()> {
 	loop {
 		let (key, value, read) = match read_header_line_limited(reader).await? {
@@ -311,66 +312,64 @@ pub async fn read_headers_limited<T>(
 
 		match size_limit.checked_sub(read) {
 			Some(new_limit) => size_limit = new_limit,
-			None => break Err(HttpError::HeadersTooLong.as_err())
+			None => break Err(HttpError::HeadersTooLong.into())
 		}
 
 		let value = value.unwrap_or_else(|| {
 			warn!(target: log, "== Header separator not found");
 
-			"".to_string()
+			HeaderValue::from_static("")
 		});
 
-		trace!(target: log, ">> {}: {}", key, value);
+		if let Ok(str) = value.to_str() {
+			trace!(target: log, ">> {}: {}", key.as_str(), str);
+		} else {
+			trace!(target: log, ">> {}: {:?}", key.as_str(), value);
+		}
 
-		headers.insert(key, value);
+		headers.insert(key, value)?;
 	}
 }
 
 #[asynchronous]
+#[allow(clippy::impl_trait_in_params)]
 pub async fn parse_response(
-	reader: &mut impl BufRead, request: &Request, headers: &mut HashMap<String, String>
+	reader: &mut impl BufRead, request: &Request, headers: &mut Headers
 ) -> Result<(StatusCode, Version)> {
 	let mut total_size = 0;
 
 	let prefix_matches = {
-		let prefix = "HTTP/";
+		let prefix = b"HTTP/";
 
 		while reader.buffer().len() < prefix.len() {
-			if reader.fill().await? != 0 {
-				continue;
+			if reader.fill().await? == 0 {
+				return Err(Core::UnexpectedEof.into());
 			}
-
-			return Err(Core::UnexpectedEof.as_err());
 		}
 
-		/* unchecked because if it's binary, that's still valid for HTTP/0.9. we only
-		 * care if it matches the prefix */
-		let actual = unsafe { from_utf8_unchecked(&reader.buffer()[0..prefix.len()]) };
-
-		prefix.eq_ignore_ascii_case(actual)
+		prefix == &reader.buffer()[0..prefix.len()]
 	};
 
 	let (version, status) = if !prefix_matches {
 		warn!(target: request, "Invalid status line, assuming HTTP 0.9");
 
-		Some((Version::Http09, StatusCode::OK))
+		(Version::Http09, StatusCode::OK)
 	} else {
 		let (line, offset) = read_line_in_place(reader).await?;
-		let result = parse_status_line(line);
+		let result =
+			parse_status_line(line).ok_or_else(|| HttpError::InvalidStatusLine(line.to_string()));
 
-		total_size += offset;
+		#[allow(clippy::arithmetic_side_effects)]
+		(total_size += offset);
 		reader.consume(offset);
-		result
-	}
-	.ok_or_else(|| HttpError::InvalidStatusLine.as_err())?;
+
+		result?
+	};
 
 	trace!(target: request, ">> {} {}", version.as_str(), status);
 
 	if version < request.options.min_version || version > request.options.max_version {
-		return Err(Error::simple(
-			ErrorKind::InvalidData,
-			Some(format!("Unexpected version {}", version.as_str()))
-		));
+		return Err(HttpError::UnexpectedVersion(version).into());
 	}
 
 	if version == Version::Http09 {
@@ -379,7 +378,7 @@ pub async fn parse_response(
 
 	match (request.options.maximum_header_size as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, headers, limit, request).await?,
-		None => return Err(HttpError::HeadersTooLong.as_err())
+		None => return Err(HttpError::HeadersTooLong.into())
 	}
 
 	Ok((status, version))
@@ -389,32 +388,41 @@ pub struct RawResponse {
 	pub stats: Stats,
 	pub version: Version,
 	pub status: StatusCode,
-	pub headers: HashMap<String, String>,
+	pub headers: Headers,
 	pub url: Option<Url>
 }
 
 #[asynchronous]
 pub async fn transfer(
-	request: &Request, connection_pool: Option<()>
+	request: &mut Request, connection_pool: Option<()>
 ) -> Result<(RawResponse, BufReader<HttpStream>)> {
-	let mut url = &request.url;
+	let version = Version::Http11;
+	let req_url = request.request.finalize()?;
+
+	if version <= Version::Http11 && !request.headers.contains_key(HOST) {
+		request.headers.insert(HOST, req_url.host_str().unwrap())?;
+	}
+
+	let req_url = request.request.url().unwrap();
+
+	let mut url = req_url;
 
 	let mut redirected_url = None;
 	let mut redirects_remaining = request.options.follow_redirect;
 
-	let mut response_headers = HashMap::new();
+	let mut response_headers = Headers::new();
 
 	loop {
-		debug!(target: request, "== Starting request for '{}'", url.as_str());
+		debug!(target: &*request, "== Starting request for '{}'", url.as_str());
 
 		let (conn, stats) = get_connection_for(request, url, connection_pool).await?;
-		let mut stats = stats.unwrap_or_else(|| Stats::default());
+		let mut stats = stats.unwrap_or_else(Stats::default);
 
 		let (stream, mut buf, _) = {
 			let mut writer = BufWriter::from_parts(conn.stream, conn.buf, 0);
 			let stall = Instant::now();
 
-			send_request(&mut writer, request, url, Version::Http11).await?;
+			send_request(&mut writer, request, url, version).await?;
 
 			stats.stall = stall.elapsed();
 			writer.into_parts()
@@ -423,7 +431,7 @@ pub async fn transfer(
 		buf.clear();
 		response_headers.clear();
 
-		let (response, reader) = {
+		let (mut response, reader) = {
 			let start = Instant::now();
 			let mut reader = BufReader::from_parts(stream, buf, 0);
 
@@ -441,15 +449,16 @@ pub async fn transfer(
 					version,
 					status,
 					headers: response_headers,
-					url: redirected_url
+					url: None
 				},
 				reader
 			)
 		};
 
 		if redirects_remaining > 0 && response.status.is_redirection() {
-			if let Some(location) = response.headers.get("location") {
-				redirects_remaining -= 1;
+			if let Some(location) = response.headers.get_str(LOCATION)? {
+				#[allow(clippy::arithmetic_side_effects)]
+				(redirects_remaining -= 1);
 
 				let body = Body::new(reader, request, &response)?;
 
@@ -460,17 +469,14 @@ pub async fn transfer(
 					// TODO store connection for reuse later
 				}
 
-				redirected_url = response.url;
+				let new_url = url
+					.join(location)
+					.map_err(|_| UrlError::InvalidRedirectUrl(location.to_string()))?;
 
-				/* unborrow to keep compiler happy */
-				url = &request.url;
-				url = redirected_url.insert(
-					url.join(location)
-						.map_err(|_| UrlError::InvalidRedirectUrl.as_err())?
-				);
+				url = redirected_url.insert(new_url);
 
-				if url.scheme() != request.url.scheme() {
-					return Err(UrlError::RedirectForbidden.as_err());
+				if url.scheme() != req_url.scheme() {
+					return Err(UrlError::RedirectForbidden(url.scheme().to_string()).into());
 				}
 
 				response_headers = response.headers;
@@ -478,6 +484,8 @@ pub async fn transfer(
 				continue;
 			}
 		}
+
+		response.url = redirected_url;
 
 		break Ok((response, reader));
 	}

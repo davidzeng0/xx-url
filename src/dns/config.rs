@@ -11,20 +11,16 @@ pub struct Config {
 #[asynchronous]
 impl Config {
 	pub async fn new() -> Result<Self> {
-		let mut data = Vec::new();
+		let data = File::load(resolver_conf_path()).await?;
+		let config = ResolveConfig::parse(data).map_err(Error::map)?;
 
-		BufReader::new(File::open(resolver_conf_path()).await?)
-			.read_to_end(&mut data)
-			.await?;
-
-		let config = ResolveConfig::parse(data).map_err(Error::map_as_invalid_data)?;
 		let mut name_servers = Vec::new();
 
 		for ip in &config.nameservers {
 			name_servers.push(NameServer::new(ip.into()));
 		}
 
-		Ok(Config {
+		Ok(Self {
 			name_servers,
 			ndots: config.ndots,
 			attempts: config.attempts,

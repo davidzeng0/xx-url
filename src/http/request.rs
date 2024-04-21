@@ -1,10 +1,4 @@
-use std::time::Duration;
-
-use xx_core::{
-	coroutines::{with_context, Context, Task},
-	macros::wrapper_functions,
-	pointer::*
-};
+use xx_core::{coroutines::Task, macros::wrapper_functions};
 
 use super::*;
 use crate::net::connection::IpStrategy;
@@ -20,7 +14,8 @@ impl HttpRequest {
 		mut inner = self.inner;
 
 		#[chain]
-		pub fn header(&mut self, key: impl ToString, value: impl ToString) -> &mut Self;
+		#[allow(clippy::impl_trait_in_params)]
+		pub fn header(&mut self, key: impl TryIntoHeaderName, value: impl TryIntoHeaderValue) -> &mut Self;
 
 		#[chain]
 		pub fn set_port(&mut self, port: u16) -> &mut Self;
@@ -38,34 +33,34 @@ impl HttpRequest {
 		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
 	}
 
-	pub async fn run(&self) -> Result<Response> {
+	pub async fn run(&mut self) -> Result<Response> {
 		Response::fetch(self).await
 	}
 }
 
+#[asynchronous(task)]
 impl Task for HttpRequest {
-	type Output = Result<Response>;
+	type Output<'a> = Result<Response>;
 
-	fn run(self, context: Ptr<Context>) -> Result<Response> {
-		unsafe { with_context(context, Response::fetch(&self)) }
+	async fn run(mut self) -> Result<Response> {
+		Response::fetch(&mut self).await
 	}
 }
 
-fn new_request(url: &str, method: Method) -> Result<HttpRequest> {
-	let mut request = Request::new(
-		Url::parse(url).map_err(|_| UrlError::InvalidUrl.as_err())?,
-		method
-	);
+fn new_request(url: impl AsRef<str>, method: Method) -> HttpRequest {
+	let request = RequestBase::new(url, |scheme| matches!(scheme, "http" | "https"));
+	let mut inner = Request::new(request, method);
 
-	match request.url.scheme() {
-		"http" => (),
-		"https" => request.options.secure = true,
-		_ => return Err(UrlError::InvalidScheme.as_err())
+	if let Some(url) = inner.request.url() {
+		if url.scheme() == "https" {
+			inner.options.secure = true;
+		}
 	}
 
-	Ok(HttpRequest { inner: request })
+	HttpRequest { inner }
 }
 
-pub fn get(url: &str) -> Result<HttpRequest> {
+#[must_use]
+pub fn get(url: &str) -> HttpRequest {
 	new_request(url, Method::GET)
 }

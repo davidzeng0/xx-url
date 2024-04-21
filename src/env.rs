@@ -1,5 +1,5 @@
 use std::{
-	cell::RefCell,
+	cell::OnceCell,
 	sync::{Arc, Mutex},
 	time::Instant
 };
@@ -22,34 +22,33 @@ struct ThreadLocalData {
 	tls_client_config: Arc<ClientConfig>
 }
 
-static mut GLOBAL_DATA: Mutex<Option<GlobalData>> = Mutex::new(None);
+static GLOBAL_DATA: Mutex<Option<GlobalData>> = Mutex::new(None);
 
 thread_local! {
-	static THREAD_LOCAL_DATA: RefCell<Option<ThreadLocalData>> = RefCell::new(None);
+	static THREAD_LOCAL_DATA: OnceCell<ThreadLocalData> = const { OnceCell::new() };
 }
 
-#[main]
-async fn create_resolver() -> Result<Resolver> {
-	Resolver::new().await
-}
-
-fn create_global_data() -> GlobalData {
+#[asynchronous]
+async fn create_global_data() -> GlobalData {
 	let start = Instant::now();
 
 	debug!("++ Initializing shared data");
 
 	let config = {
-		let certs = load_system_certs().expect("Failed to load certs");
+		let certs = load_system_certs().await.expect("Failed to load certs");
 
 		Arc::new(
 			ClientConfig::builder()
-				.with_safe_defaults()
 				.with_root_certificates(certs)
 				.with_no_client_auth()
 		)
 	};
 
-	let resolver = Arc::new(create_resolver().expect("Failed to initialize DNS resolver"));
+	let resolver = Arc::new(
+		Resolver::new()
+			.await
+			.expect("Failed to initialize DNS resolver")
+	);
 
 	debug!(
 		"== Initialized shared data in {:.3} ms",
@@ -59,59 +58,74 @@ fn create_global_data() -> GlobalData {
 	GlobalData { dns_resolver: resolver, tls_client_config: config }
 }
 
-fn get_global_data() -> GlobalData {
-	let mut data = unsafe { &GLOBAL_DATA }.lock().unwrap();
-
-	if let Some(config) = &*data {
+#[asynchronous]
+async fn get_global_data() -> GlobalData {
+	if let Some(config) = &*GLOBAL_DATA.lock().unwrap() {
 		return config.clone();
 	}
 
-	data.insert(create_global_data()).clone()
+	let data = create_global_data().await;
+
+	*GLOBAL_DATA.lock().unwrap() = Some(data.clone());
+
+	data
 }
 
-fn create_thread_local_data() -> ThreadLocalData {
-	let data = get_global_data();
+#[asynchronous]
+async fn create_thread_local_data() -> ThreadLocalData {
+	let data = get_global_data().await;
 
 	ThreadLocalData {
-		dns_resolver: data.dns_resolver.clone(),
-		tls_client_config: data.tls_client_config.clone()
+		dns_resolver: data.dns_resolver,
+		tls_client_config: data.tls_client_config
 	}
 }
 
-fn get_data() -> ThreadLocalData {
-	THREAD_LOCAL_DATA.with(|data| {
-		if let Some(data) = &*data.borrow() {
-			return data.clone();
-		}
+#[asynchronous]
+async fn get_data() -> ThreadLocalData {
+	let data = THREAD_LOCAL_DATA.with(|data| data.get().cloned());
 
-		data.borrow_mut().insert(create_thread_local_data()).clone()
-	})
+	if let Some(data) = data {
+		return data;
+	}
+
+	let data = create_thread_local_data().await;
+
+	THREAD_LOCAL_DATA.with(|tls| {
+		let _ = tls.set(data.clone());
+	});
+
+	data
 }
 
+#[allow(clippy::must_use_candidate, clippy::missing_const_for_fn)]
 pub fn resolver_conf_path() -> &'static str {
 	"/etc/resolv.conf"
 }
 
+#[allow(clippy::must_use_candidate, clippy::missing_const_for_fn)]
 pub fn hosts_path() -> &'static str {
 	"/etc/hosts"
 }
 
+#[allow(clippy::must_use_candidate, clippy::missing_const_for_fn)]
 pub fn root_certs_path() -> &'static str {
 	"/etc/ssl/certs"
 }
 
-pub fn get_tls_client_config() -> Arc<ClientConfig> {
-	get_data().tls_client_config
+#[asynchronous]
+pub async fn get_tls_client_config() -> Arc<ClientConfig> {
+	get_data().await.tls_client_config
 }
 
-pub fn get_resolver() -> Arc<Resolver> {
-	get_data().dns_resolver
+#[asynchronous]
+pub async fn get_resolver() -> Arc<Resolver> {
+	get_data().await.dns_resolver
 }
 
+#[allow(clippy::missing_panics_doc)]
 pub fn free_data() {
-	unsafe { &GLOBAL_DATA }.lock().unwrap().take();
-
-	THREAD_LOCAL_DATA.take();
+	GLOBAL_DATA.lock().unwrap().take();
 
 	debug!("-- Uninitialized shared data");
 }

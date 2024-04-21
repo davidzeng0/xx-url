@@ -11,7 +11,9 @@ pub struct WebSocketOptions {
 }
 
 impl WebSocketOptions {
-	pub fn new() -> Self {
+	#[allow(clippy::new_without_default)]
+	#[must_use]
+	pub const fn new() -> Self {
 		Self {
 			handshake_timeout: duration!(1 m),
 			max_message_length: DEFAULT_MAX_MESSAGE_LENGTH,
@@ -47,7 +49,8 @@ impl WsRequest {
 		mut inner = self.inner;
 
 		#[chain]
-		pub fn header(&mut self, key: impl ToString, value: impl ToString) -> &mut Self;
+		#[allow(clippy::impl_trait_in_params)]
+		pub fn header(&mut self, key: impl TryIntoHeaderName, value: impl TryIntoHeaderValue) -> &mut Self;
 
 		#[chain]
 		pub fn set_port(&mut self, port: u16) -> &mut Self;
@@ -85,25 +88,24 @@ impl WsRequest {
 	}
 }
 
+#[asynchronous(task)]
 impl Task for WsRequest {
-	type Output = Result<WebSocket>;
+	type Output<'a> = Result<WebSocket>;
 
-	fn run(mut self, context: Ptr<Context>) -> Result<WebSocket> {
-		unsafe { with_context(context, WebSocket::new(&mut self)) }
+	async fn run(mut self) -> Result<WebSocket> {
+		WebSocket::new(&mut self).await
 	}
 }
 
 pub fn open(url: &str) -> Result<WsRequest> {
-	let mut request = Request::new(
-		Url::parse(url).map_err(Error::map_as_invalid_input)?,
-		Method::GET
-	);
+	let request = RequestBase::new(url, |scheme| matches!(scheme, "ws" | "wss"));
+	let mut inner = Request::new(request, Method::GET);
 
-	match request.url.scheme() {
-		"ws" => (),
-		"wss" => request.options.secure = true,
-		_ => return Err(UrlError::InvalidScheme.as_err())
+	if let Some(url) = inner.request.url() {
+		if url.scheme() == "wss" {
+			inner.options.secure = true;
+		}
 	}
 
-	Ok(WsRequest { inner: request, options: WebSocketOptions::new() })
+	Ok(WsRequest { inner, options: WebSocketOptions::new() })
 }

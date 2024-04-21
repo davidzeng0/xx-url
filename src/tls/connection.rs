@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::{
 	io::{self, IoSlice, IoSliceMut},
 	sync::Arc,
@@ -9,21 +11,20 @@ use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
 use xx_core::{
 	async_std::io::*,
-	coroutines::{check_interrupt, get_context, with_context, Context},
+	coroutines::{get_context, scoped, Context},
 	debug,
 	macros::wrapper_functions,
 	os::{
-		poll::PollFlag,
+		epoll::PollFlag,
 		socket::{MessageFlag, Shutdown}
 	},
-	pointer::*,
 	trace
 };
 
 use super::*;
 use crate::net::connection::{self, ConnectOptions, Connection};
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct ConnectStats {
 	pub stats: connection::ConnectStats,
 	pub tls_connect: Duration
@@ -35,48 +36,40 @@ impl From<connection::ConnectStats> for ConnectStats {
 	}
 }
 
-struct AsyncConnection {
-	connection: Connection,
-	read_context: Ptr<Context>,
-	write_context: Ptr<Context>
+struct Adapter<'a> {
+	connection: &'a mut Connection,
+	context: &'a Context,
+	flags: BitFlags<MessageFlag>
 }
 
-impl AsyncConnection {
-	fn new(connection: Connection) -> Self {
-		/* Safety: context is assigned before read/write operations */
-		Self {
-			read_context: Ptr::null(),
-			write_context: Ptr::null(),
-			connection
-		}
+impl<'a> Adapter<'a> {
+	fn new(connection: &'a mut Connection, context: &'a Context) -> Self {
+		Self { connection, context, flags: BitFlags::default() }
 	}
 }
 
-impl io::Read for AsyncConnection {
+impl io::Read for Adapter<'_> {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-		unsafe { with_context(self.read_context, self.connection.read(buf)) }
-			.map_err(|err| err.into())
+		/* Safety: guaranteed by caller */
+		unsafe { scoped(self.context, self.connection.recv(buf, self.flags)) }.map_err(Into::into)
 	}
 
 	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-		unsafe { with_context(self.read_context, self.connection.read_vectored(bufs)) }
-			.map_err(|err| err.into())
+		/* Safety: guaranteed by caller */
+		unsafe {
+			scoped(
+				self.context,
+				self.connection.recv_vectored(bufs, self.flags)
+			)
+		}
+		.map_err(Into::into)
 	}
 }
 
-impl io::Write for AsyncConnection {
-	/* we set don't wait for writes in error state.
-	 * in normal usecase, the flag should have no effect
-	 * due to polling
-	 */
+impl io::Write for Adapter<'_> {
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		unsafe {
-			with_context(
-				self.write_context,
-				self.connection.send(buf, MessageFlag::DontWait as u32)
-			)
-		}
-		.map_err(|err| err.into())
+		/* Safety: guaranteed by caller */
+		unsafe { scoped(self.context, self.connection.send(buf, self.flags)) }.map_err(Into::into)
 	}
 
 	fn flush(&mut self) -> io::Result<()> {
@@ -84,34 +77,34 @@ impl io::Write for AsyncConnection {
 	}
 
 	fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> io::Result<usize> {
+		/* Safety: guaranteed by caller */
 		unsafe {
-			with_context(
-				self.write_context,
-				self.connection
-					.send_vectored(bufs, MessageFlag::DontWait as u32)
+			scoped(
+				self.context,
+				self.connection.send_vectored(bufs, self.flags)
 			)
 		}
-		.map_err(|err| err.into())
+		.map_err(Into::into)
 	}
 }
 
 pub struct TlsConn {
-	inner: AsyncConnection,
+	connection: Connection,
 	tls: ClientConnection
 }
 
 #[asynchronous]
 impl TlsConn {
 	wrapper_functions! {
-		inner = self.inner.connection;
+		inner = self.connection;
 
 		pub fn has_peer_hungup(&self) -> Result<bool>;
 
 		#[asynchronous]
-		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
+		pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
 		#[asynchronous]
-		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
+		pub async fn shutdown(&mut self, how: Shutdown) -> Result<()>;
 
 		#[asynchronous]
 		pub async fn close(self) -> Result<()>;
@@ -121,8 +114,9 @@ impl TlsConn {
 		let now = Instant::now();
 		let mut eof = false;
 
-		self.inner.read_context = get_context().await;
-		self.inner.write_context = get_context().await;
+		/* Safety: we are in an async function */
+		#[allow(clippy::multiple_unsafe_ops_per_block)]
+		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
 		loop {
 			let handshaking = self.tls.is_handshaking();
@@ -138,12 +132,10 @@ impl TlsConn {
 				flags |= PollFlag::In;
 			}
 
-			let flags = self.poll(flags).await?;
+			let flags = adapter.connection.poll(flags).await?;
 
-			if flags.intersects(PollFlag::Out) {
-				if self.tls.write_tls(&mut self.inner)? == 0 {
-					eof = true;
-				}
+			if flags.intersects(PollFlag::Out) && self.tls.write_tls(&mut adapter)? == 0 {
+				eof = true;
 			}
 
 			if !handshaking && !eof {
@@ -151,12 +143,15 @@ impl TlsConn {
 			}
 
 			if flags.intersects(PollFlag::In) {
-				if self.tls.read_tls(&mut self.inner)? == 0 {
+				if self.tls.read_tls(&mut adapter)? == 0 {
 					eof = true;
 				} else if let Err(err) = self.tls.process_new_packets() {
-					let _ = self.tls.write_tls(&mut self.inner);
+					/* we don't want to wait for writes in error state */
+					adapter.flags = MessageFlag::DontWait.into();
 
-					return Err(Error::map_as_invalid_input(err));
+					let _ = self.tls.write_tls(&mut adapter);
+
+					return Err(Error::map(err));
 				}
 			}
 
@@ -166,7 +161,7 @@ impl TlsConn {
 
 			match (eof, handshaking, self.tls.is_handshaking()) {
 				(_, true, false) | (_, false, _) => break,
-				(true, true, true) => return Err(Core::UnexpectedEof.as_err()),
+				(true, true, true) => return Err(Core::UnexpectedEof.into()),
 				(..) => ()
 			}
 		}
@@ -174,7 +169,7 @@ impl TlsConn {
 		let elapsed = now.elapsed();
 
 		debug!(
-			target: self,
+			target: &*self,
 			"== TLS connected using {:?} / {:?} ({:.3} ms)",
 			self.tls.protocol_version().unwrap(),
 			self.tls.negotiated_cipher_suite().unwrap(),
@@ -185,17 +180,17 @@ impl TlsConn {
 			.tls
 			.peer_certificates()
 			.and_then(|certs| certs.first())
-			.and_then(|cert| X509Certificate::from_der(&cert.0).ok())
+			.and_then(|cert| X509Certificate::from_der(cert).ok())
 		{
-			trace!(target: self, "== Certificate: ");
-			trace!(target: self, "::     Subject: {}", cert.subject());
-			trace!(target: self, "::     Issuer : {}", cert.issuer());
-			trace!(target: self, "::     Start  : {}", cert.validity().not_before);
-			trace!(target: self, "::     Expire : {}", cert.validity().not_after);
+			trace!(target: &*self, "== Certificate: ");
+			trace!(target: &*self, "::     Subject: {}", cert.subject());
+			trace!(target: &*self, "::     Issuer : {}", cert.issuer());
+			trace!(target: &*self, "::     Start  : {}", cert.validity().not_before);
+			trace!(target: &*self, "::     Expire : {}", cert.validity().not_after);
 
 			if let Ok(Some(alt)) = cert.subject_alternative_name() {
 				for name in &alt.value.general_names {
-					trace!(target: self, "::     Alt    : {}", name);
+					trace!(target: &*self, "::     Alt    : {}", name);
 				}
 			}
 		}
@@ -206,17 +201,14 @@ impl TlsConn {
 	}
 
 	pub async fn connect_stats_config(
-		options: &ConnectOptions, config: Arc<ClientConfig>
-	) -> Result<(TlsConn, ConnectStats)> {
-		let server_name = options
-			.host()
-			.try_into()
-			.map_err(Error::map_as_invalid_input)?;
-		let tls =
-			ClientConnection::new(config, server_name).map_err(Error::map_as_invalid_input)?;
+		options: &ConnectOptions<'_>, config: Arc<ClientConfig>
+	) -> Result<(Self, ConnectStats)> {
+		let server_name = options.host().to_string().try_into().map_err(Error::map)?;
+		let tls = ClientConnection::new(config, server_name).map_err(Error::map)?;
 
 		let (connection, stats) = Connection::connect_stats(options).await?;
-		let mut connection = TlsConn { inner: AsyncConnection::new(connection), tls };
+
+		let mut connection = Self { connection, tls };
 		let mut stats = stats.into();
 
 		connection.tls_connect(&mut stats).await?;
@@ -225,16 +217,16 @@ impl TlsConn {
 	}
 
 	pub async fn connect_config(
-		options: &ConnectOptions, config: Arc<ClientConfig>
-	) -> Result<TlsConn> {
+		options: &ConnectOptions<'_>, config: Arc<ClientConfig>
+	) -> Result<Self> {
 		Ok(Self::connect_stats_config(options, config).await?.0)
 	}
 
-	pub async fn connect_stats(options: &ConnectOptions) -> Result<(TlsConn, ConnectStats)> {
-		Ok(Self::connect_stats_config(options, get_tls_client_config()).await?)
+	pub async fn connect_stats(options: &ConnectOptions<'_>) -> Result<(Self, ConnectStats)> {
+		Self::connect_stats_config(options, get_tls_client_config().await).await
 	}
 
-	pub async fn connect(options: &ConnectOptions) -> Result<TlsConn> {
+	pub async fn connect(options: &ConnectOptions<'_>) -> Result<Self> {
 		Ok(Self::connect_stats(options).await?.0)
 	}
 
@@ -248,17 +240,16 @@ impl TlsConn {
 			Err(err) => return Err(err.into())
 		}
 
-		loop {
-			self.inner.read_context = get_context().await;
+		/* Safety: we are in an async function */
+		#[allow(clippy::multiple_unsafe_ops_per_block)]
+		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
-			if self.tls.read_tls(&mut self.inner)? == 0 {
+		loop {
+			if self.tls.read_tls(&mut adapter)? == 0 {
 				return Ok(0);
 			}
 
-			let state = self
-				.tls
-				.process_new_packets()
-				.map_err(Error::map_as_invalid_data)?;
+			let state = self.tls.process_new_packets().map_err(Error::map)?;
 
 			if state.plaintext_bytes_to_read() == 0 {
 				check_interrupt().await?;
@@ -283,13 +274,15 @@ impl TlsConn {
 	async fn tls_write(
 		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
 	) -> Result<usize> {
-		self.inner.write_context = get_context().await;
+		/* Safety: we are in an async function */
+		#[allow(clippy::multiple_unsafe_ops_per_block)]
+		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
 		loop {
 			let wrote = write(&mut self.tls)?;
 
 			while self.tls.wants_write() {
-				if self.tls.write_tls(&mut self.inner)? == 0 {
+				if self.tls.write_tls(&mut adapter)? == 0 {
 					return Ok(wrote);
 				}
 
@@ -344,5 +337,3 @@ impl Write for TlsConn {
 		self.send_vectored(bufs).await
 	}
 }
-
-unsafe impl SimpleSplit for TlsConn {}

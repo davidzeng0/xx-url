@@ -1,14 +1,12 @@
-use std::{collections::HashMap, str::from_utf8};
-
 use xx_core::trace;
 
 use super::*;
 use crate::http::transfer::*;
 
 macro_rules! check_header {
-	($headers: expr, $header: literal, $value: expr, $error: expr) => {
+	($headers:expr, $header:literal, $value:expr, $error:expr) => {
 		if !$headers
-			.get($header)
+			.get_str($header)?
 			.is_some_and(|val| val.eq_ignore_ascii_case($value))
 		{
 			return Err($error);
@@ -17,7 +15,7 @@ macro_rules! check_header {
 }
 
 #[asynchronous]
-pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
+pub async fn connect(request: &mut WsRequest) -> Result<BufReader<HttpStream>> {
 	let mut key_bytes = [0u8; 24];
 	let mut accept_bytes = [0u8; 28];
 
@@ -35,9 +33,7 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 
 	let timeout = request.options.handshake_timeout;
 
-	let mut request = request.inner.clone();
-
-	if let Some(connect_timeout) = &mut request.options.timeout {
+	if let Some(connect_timeout) = &mut request.inner.options.timeout {
 		*connect_timeout = (*connect_timeout).min(timeout);
 	}
 
@@ -46,34 +42,34 @@ pub async fn connect(request: &WsRequest) -> Result<BufReader<HttpStream>> {
 	request.header("Sec-WebSocket-Version", WEB_SOCKET_VERSION);
 	request.header("Sec-WebSocket-Key", key);
 
-	let (response, reader) = transfer(&request, None)
+	let (response, reader) = transfer(&mut request.inner, None)
 		.timeout(timeout)
 		.await
-		.ok_or_else(|| WebSocketError::HandshakeTimeout.as_err())??;
+		.ok_or(WebSocketError::HandshakeTimeout)??;
 
 	if response.status != StatusCode::SWITCHING_PROTOCOLS {
-		return Err(WebSocketError::ServerRejected.as_err());
+		return Err(WebSocketError::ServerRejected.into());
 	}
 
 	check_header!(
 		response.headers,
-		"connection",
-		"upgrade",
-		WebSocketError::ServerRejected.as_err()
+		"Connection",
+		"Upgrade",
+		WebSocketError::ServerRejected.into()
 	);
 
 	check_header!(
 		response.headers,
-		"upgrade",
+		"Upgrade",
 		"websocket",
-		WebSocketError::ServerRejected.as_err()
+		WebSocketError::ServerRejected.into()
 	);
 
 	check_header!(
 		response.headers,
-		"sec-websocket-accept",
+		"Sec-WebSocket-Accept",
 		accept,
-		WebSocketError::ServerRejected.as_err()
+		WebSocketError::ServerRejected.into()
 	);
 
 	Ok(reader)
@@ -93,66 +89,64 @@ fn parse_request_line(line: &str) -> Option<(Version, String)> {
 }
 
 #[asynchronous]
-async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<HashMap<String, String>> {
+async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<Headers> {
 	let mut total_size = 0;
 
 	let (line, offset) = read_line_in_place(reader).await?;
-	let (version, url) = parse_request_line(line).ok_or_else(|| HttpError::InvalidStatusLine)?;
+	let (version, url) =
+		parse_request_line(line).ok_or_else(|| HttpError::InvalidStatusLine(line.to_string()))?;
 
-	total_size += offset;
+	#[allow(clippy::arithmetic_side_effects)]
+	(total_size += offset);
 	reader.consume(offset);
 
 	trace!(target: log, ">> GET {} {}", url, version.as_str());
 
 	if version != Version::Http11 {
-		return Err(Error::simple(
-			ErrorKind::InvalidData,
-			Some(format!("Unexpected version {}", version.as_str()))
-		));
+		return Err(HttpError::UnexpectedVersion(version).into());
 	}
 
-	let mut headers = HashMap::new();
+	let mut headers = Headers::new();
 
 	match (DEFAULT_MAXIMUM_HEADER_SIZE as usize).checked_sub(total_size) {
 		Some(limit) => read_headers_limited(reader, &mut headers, limit, log).await?,
-		None => return Err(HttpError::HeadersTooLong.as_err())
+		None => return Err(HttpError::HeadersTooLong.into())
 	}
 
 	Ok(headers)
 }
 
 #[asynchronous]
-pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufReader<HttpStream>> {
-	let (read, write) = stream.split();
-	let mut reader = BufReader::new(read);
-	let mut writer = BufWriter::new(write);
-
+pub async fn handle_upgrade<T>(stream: HttpStream, log: &T) -> Result<BufReader<HttpStream>> {
+	let mut reader = BufReader::new(stream);
 	let headers = handle_request(&mut reader, log).await?;
+	let (stream, buf, pos) = reader.into_parts();
+	let mut writer = BufWriter::new(stream);
 
 	check_header!(
 		headers,
-		"connection",
-		"upgrade",
-		WebSocketError::InvalidClientRequest.as_err()
+		"Connection",
+		"Upgrade",
+		WebSocketError::InvalidClientRequest.into()
 	);
 
 	check_header!(
 		headers,
-		"upgrade",
+		"Upgrade",
 		"websocket",
-		WebSocketError::InvalidClientRequest.as_err()
+		WebSocketError::InvalidClientRequest.into()
 	);
 
 	check_header!(
 		headers,
-		"sec-websocket-version",
+		"Sec-WebSocket-Version",
 		WEB_SOCKET_VERSION,
-		WebSocketError::InvalidClientRequest.as_err()
+		WebSocketError::InvalidClientRequest.into()
 	);
 
-	let key = match headers.get("sec-websocket-key") {
+	let key = match headers.get_str("Sec-WebSocket-Key")? {
 		Some(key) => key,
-		None => return Err(WebSocketError::InvalidClientRequest.as_err())
+		None => return Err(WebSocketError::InvalidClientRequest.into())
 	};
 
 	let mut accept_bytes = [0u8; 28];
@@ -160,13 +154,11 @@ pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufRea
 	Key::from(key)?.accept(&mut accept_bytes);
 
 	macro_rules! http_write {
-		($writer: expr, $($arg: tt)*) => {
-			{
-				trace!(target: log, "<< {}", format_args!($($arg)*));
+		($writer: expr, $($arg: tt)*) => {{
+			trace!(target: log, "<< {}", format_args!($($arg)*));
 
-				$writer.write_fmt(format_args!("{}\r\n", format_args!($($arg)*)))
-			}
-		};
+			$writer.write_fmt(format_args!("{}\r\n", format_args!($($arg)*)))
+		}};
 	}
 
 	http_write!(
@@ -178,11 +170,11 @@ pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufRea
 	)
 	.await?;
 
-	http_write!(writer, "connection: Upgrade").await?;
-	http_write!(writer, "upgrade: websocket").await?;
+	http_write!(writer, "Connection: Upgrade").await?;
+	http_write!(writer, "Upgrade: websocket").await?;
 	http_write!(
 		writer,
-		"sec-websocket-accept: {}",
+		"Sec-WebSocket-Accept: {}",
 		from_utf8(&accept_bytes).unwrap()
 	)
 	.await?;
@@ -190,7 +182,7 @@ pub async fn handle_upgrade<T>(mut stream: HttpStream, log: &T) -> Result<BufRea
 	writer.write_string("\r\n").await?;
 	writer.flush().await?;
 
-	let (_, buf, pos) = reader.into_parts();
+	let (stream, ..) = writer.into_parts();
 
 	Ok(BufReader::from_parts(stream, buf, pos))
 }

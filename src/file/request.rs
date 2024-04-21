@@ -1,29 +1,22 @@
-use xx_core::{
-	coroutines::{with_context, Context, Task},
-	pointer::*
-};
+use xx_core::coroutines::Task;
 
 use super::*;
 
 pub struct Request {
-	pub(super) url: Url,
+	pub(super) inner: RequestBase,
 	pub(super) start: Option<u64>,
 	pub(super) end: Option<u64>
 }
 
 impl Request {
-	pub fn new(url: &str) -> Result<Self> {
-		let this = Self {
-			url: Url::parse(url).map_err(|_| UrlError::InvalidUrl.as_err())?,
+	#[must_use]
+	#[allow(clippy::impl_trait_in_params)]
+	pub fn new(url: impl AsRef<str>) -> Self {
+		Self {
+			inner: RequestBase::new(url, |scheme| scheme == "file"),
 			start: None,
 			end: None
-		};
-
-		if this.url.scheme() != "file" {
-			return Err(UrlError::InvalidScheme.as_err());
 		}
-
-		Ok(this)
 	}
 
 	pub fn start(&mut self, start: u64) -> &mut Self {
@@ -37,19 +30,22 @@ impl Request {
 	}
 
 	#[asynchronous]
-	pub async fn run(&self) -> Result<FileStream> {
+	pub async fn run(&mut self) -> Result<FileStream> {
 		FileStream::new(self).await
 	}
 }
 
+#[asynchronous(task)]
 impl Task for Request {
-	type Output = Result<FileStream>;
+	type Output<'a> = Result<FileStream>;
 
-	fn run(self, context: Ptr<Context>) -> Result<FileStream> {
-		unsafe { with_context(context, FileStream::new(&self)) }
+	async fn run(mut self) -> Result<FileStream> {
+		FileStream::new(&mut self).await
 	}
 }
 
-pub fn get(url: &str) -> Result<Request> {
+#[must_use]
+#[allow(clippy::impl_trait_in_params)]
+pub fn get(url: impl AsRef<str>) -> Request {
 	Request::new(url)
 }

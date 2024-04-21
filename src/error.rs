@@ -1,17 +1,25 @@
 use xx_core::error::*;
 
-#[compact_error]
+#[errors]
 pub enum UrlError {
-	InvalidUrl         = (ErrorKind::InvalidInput, "Invalid url"),
-	InvalidScheme      = (
-		ErrorKind::InvalidInput,
-		"URL Scheme is invalid for this request"
-	),
-	PartialFile        = (ErrorKind::UnexpectedEof, "Partial file"),
-	InvalidRedirectUrl = (ErrorKind::InvalidData, "Invalid redirect url"),
-	RedirectForbidden  = (
-		ErrorKind::InvalidData,
-		"Redirect forbidden due to change in url scheme"
-	),
-	DnsTimedOut        = (ErrorKind::TimedOut, "DNS query timed out")
+	#[error("Request with an error has been consumed")]
+	InvalidRequest,
+
+	#[error("{0}")]
+	InvalidUrl(#[from] url::ParseError),
+
+	#[error("Scheme \"{0}\" is invalid for this request")]
+	InvalidScheme(String),
+
+	#[error("Partial file")]
+	PartialFile,
+
+	#[error("Invalid redirect URL {0}")]
+	InvalidRedirectUrl(String),
+
+	#[error("Redirect forbidden due to change in url scheme to {0}")]
+	RedirectForbidden(String),
+
+	#[error("DNS query timed out")]
+	DnsTimedOut
 }

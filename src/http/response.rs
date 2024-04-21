@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-
-use xx_core::coroutines::check_interrupt;
-
 use super::*;
 
 pub struct Response {
@@ -11,33 +7,39 @@ pub struct Response {
 
 #[asynchronous]
 impl Response {
-	pub async fn fetch(request: &HttpRequest) -> Result<Response> {
-		let (response, reader) = transfer(&request.inner, None).await?;
+	pub async fn fetch(request: &mut HttpRequest) -> Result<Self> {
+		let (response, reader) = transfer(&mut request.inner, None).await?;
 		let body = Body::new(reader, &request.inner, &response)?;
 
 		Ok(Self { response, body })
 	}
 
-	pub fn stats(&self) -> &Stats {
+	#[must_use]
+	pub const fn stats(&self) -> &Stats {
 		&self.response.stats
 	}
 
-	pub fn version(&self) -> Version {
+	#[must_use]
+	pub const fn version(&self) -> Version {
 		self.response.version
 	}
 
-	pub fn status(&self) -> StatusCode {
+	#[must_use]
+	pub const fn status(&self) -> StatusCode {
 		self.response.status
 	}
 
-	pub fn headers(&self) -> &HashMap<String, String> {
+	#[must_use]
+	pub const fn headers(&self) -> &Headers {
 		&self.response.headers
 	}
 
-	pub fn url(&self) -> Option<&Url> {
+	#[must_use]
+	pub const fn url(&self) -> Option<&Url> {
 		self.response.url.as_ref()
 	}
 
+	#[must_use]
 	pub fn into_body(self) -> Body {
 		self.body
 	}

@@ -3,7 +3,7 @@ use xx_core::{debug, trace};
 use super::*;
 
 pub struct Resolver {
-	services: Vec<Box<dyn Lookup>>
+	services: Vec<Box<dyn Lookup + Send + Sync>>
 }
 
 #[derive(Debug, Default)]
@@ -13,12 +13,8 @@ pub struct LookupIp {
 }
 
 impl LookupIp {
-	pub fn new() -> Self {
-		Self::default()
-	}
-
 	fn from_ip(ip: IpAddr) -> Self {
-		let mut this = Self::new();
+		let mut this = Self::default();
 
 		match ip {
 			IpAddr::V4(addr) => this.v4.push(addr),
@@ -31,21 +27,24 @@ impl LookupIp {
 	fn push_records(&mut self, records: &Vec<Record>) {
 		for record in records {
 			match record.data() {
-				Some(RData::A(ip)) => self.v4.push(ip.clone().into()),
-				Some(RData::AAAA(ip)) => self.v6.push(ip.clone().into()),
+				Some(RData::A(ip)) => self.v4.push((*ip).into()),
+				Some(RData::AAAA(ip)) => self.v6.push((*ip).into()),
 				_ => ()
 			}
 		}
 	}
 
-	pub fn v4(&self) -> &Vec<Ipv4Addr> {
+	#[must_use]
+	pub const fn v4(&self) -> &Vec<Ipv4Addr> {
 		&self.v4
 	}
 
-	pub fn v6(&self) -> &Vec<Ipv6Addr> {
+	#[must_use]
+	pub const fn v6(&self) -> &Vec<Ipv6Addr> {
 		&self.v6
 	}
 
+	#[must_use]
 	pub fn is_empty(&self) -> bool {
 		self.v4.is_empty() && self.v6.is_empty()
 	}
@@ -74,7 +73,7 @@ impl Resolver {
 		let aaaa = Query::query(name.clone(), RecordType::AAAA);
 
 		let mut error = None;
-		let mut result = LookupIp::new();
+		let mut result = LookupIp::default();
 
 		for _ in 0..3 {
 			for service in &self.services {
@@ -82,19 +81,21 @@ impl Resolver {
 				let mut success = false;
 
 				match a {
-					Err(err) => error = Some(err),
 					Ok(results) => {
 						result.push_records(results.records());
 						success = true;
 					}
+
+					Err(err) => error = Some(err)
 				}
 
 				match aaaa {
-					Err(err) => error = Some(err),
 					Ok(results) => {
 						result.push_records(results.records());
 						success = true;
 					}
+
+					Err(err) => error = Some(err)
 				}
 
 				if success {
@@ -110,13 +111,13 @@ impl Resolver {
 		match name.parse() {
 			Err(_) => (),
 			Ok(addr) => {
-				debug!(target: self, "@@ Ip: {}", addr);
+				debug!(target: self, "== Ip: {}", addr);
 
 				return Ok(LookupIp::from_ip(addr));
 			}
 		}
 
-		let name = Name::from_str(&name.to_lowercase()).map_err(Error::map_as_other)?;
+		let name = Name::from_str(&name.to_lowercase()).map_err(Error::map)?;
 		let now = Instant::now();
 
 		debug!(target: self, "<< Lookup {}", name);

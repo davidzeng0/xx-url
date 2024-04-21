@@ -8,13 +8,13 @@ use std::{
 use enumflags2::{make_bitflags, BitFlags};
 use xx_core::{
 	async_std::io::*,
-	coroutines::check_interrupt,
 	debug,
 	macros::wrapper_functions,
 	os::{
+		epoll::PollFlag,
 		inet::IpProtocol,
-		poll::{poll, BorrowedPollFd, PollFlag},
-		socket::{Shutdown, SocketType}
+		poll::{self, poll, BorrowedPollFd},
+		socket::{MessageFlag, Shutdown, SocketType}
 	}
 };
 use xx_pulse::impls::TaskExtensionsExt;
@@ -22,7 +22,7 @@ use xx_pulse::impls::TaskExtensionsExt;
 use super::*;
 use crate::dns::{LookupIp, Resolver};
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 pub struct ConnectStats {
 	pub dns_resolve: Duration,
 	pub tcp_tries: u32,
@@ -32,7 +32,7 @@ pub struct ConnectStats {
 #[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IpStrategy {
 	#[default]
-	Default = 0,
+	Default,
 	Ipv4Only,
 	Ipv6Only,
 	PreferIpv4,
@@ -52,10 +52,12 @@ pub struct ConnectOptions<'a> {
 }
 
 impl<'a> ConnectOptions<'a> {
-	pub fn new(host: &'a str, port: u16) -> Self {
-		Self::with_resolver(get_resolver(), host, port)
+	#[asynchronous]
+	pub async fn new(host: &'a str, port: u16) -> Self {
+		Self::with_resolver(get_resolver().await, host, port)
 	}
 
+	#[must_use]
 	pub fn with_resolver(resolver: Arc<Resolver>, host: &'a str, port: u16) -> Self {
 		Self {
 			resolver,
@@ -71,11 +73,13 @@ impl<'a> ConnectOptions<'a> {
 		}
 	}
 
-	pub fn host(&self) -> &str {
+	#[must_use]
+	pub const fn host(&self) -> &'a str {
 		self.host
 	}
 
-	pub fn port(&self) -> u16 {
+	#[must_use]
+	pub const fn port(&self) -> u16 {
 		self.port
 	}
 
@@ -125,41 +129,44 @@ impl Connection {
 		inner = self.inner;
 
 		#[asynchronous]
-		pub async fn recv(&self, buf: &mut [u8], flags: u32) -> Result<usize>;
+		pub async fn recv(&mut self, buf: &mut [u8], flags: BitFlags<MessageFlag>) -> Result<usize>;
 
 		#[asynchronous]
-		pub async fn send(&self, buf: &[u8], flags: u32) -> Result<usize>;
+		pub async fn send(&mut self, buf: &[u8], flags: BitFlags<MessageFlag>) -> Result<usize>;
 
 		#[asynchronous]
-		pub async fn recv_vectored(&self, bufs: &mut [IoSliceMut<'_>], flags: u32) -> Result<usize>;
+		pub async fn recv_vectored(&mut self, bufs: &mut [IoSliceMut<'_>], flags: BitFlags<MessageFlag>) -> Result<usize>;
 
 		#[asynchronous]
-		pub async fn send_vectored(&self, bufs: &[IoSlice<'_>], flags: u32) -> Result<usize>;
+		pub async fn send_vectored(&mut self, bufs: &[IoSlice<'_>], flags: BitFlags<MessageFlag>) -> Result<usize>;
 
 		#[asynchronous]
-		pub async fn poll(&self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
+		pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 
 		#[asynchronous]
-		pub async fn shutdown(&self, how: Shutdown) -> Result<()>;
+		pub async fn shutdown(&mut self, how: Shutdown) -> Result<()>;
 
 		#[asynchronous]
 		pub async fn close(self) -> Result<()>;
 	}
 
-	async fn connect_addrs<A: Iterator<Item = IpAddr>>(
-		addrs: A, options: &ConnectOptions, stats: &mut ConnectStats
-	) -> Result<Connection> {
+	async fn connect_addrs<A>(
+		addrs: A, options: &ConnectOptions<'_>, stats: &mut ConnectStats
+	) -> Result<Self>
+	where
+		A: Iterator<Item = IpAddr>
+	{
 		let mut error = None;
 		let start = Instant::now();
 
 		for ip in addrs {
 			let addr = SocketAddr::new(ip, options.port).into();
 			let socket =
-				Socket::new_for_addr(&addr, SocketType::Stream as u32, IpProtocol::Tcp as u32)
-					.await?;
-			let connection = Connection { inner: socket };
+				Socket::new_for_addr(&addr, SocketType::Stream as u32, IpProtocol::Tcp).await?;
+			let connection = Self { inner: socket };
 
-			stats.tcp_tries += 1;
+			#[allow(clippy::arithmetic_side_effects)]
+			(stats.tcp_tries += 1);
 
 			debug!(target: &connection, "<< Connecting to {}:{} - Try {}: {}", options.host, options.port, stats.tcp_tries, ip);
 
@@ -190,24 +197,22 @@ impl Connection {
 	}
 
 	async fn connect_to(
-		options: &ConnectOptions, addrs: &LookupIp, stats: &mut ConnectStats
-	) -> Result<Connection> {
-		let v4 = addrs.v4().iter().map(|addr| IpAddr::V4(addr.clone()));
-		let v6 = addrs.v6().iter().map(|addr| IpAddr::V6(addr.clone()));
+		options: &ConnectOptions<'_>, addrs: &LookupIp, stats: &mut ConnectStats
+	) -> Result<Self> {
+		let v4 = addrs.v4().iter().map(|addr| IpAddr::V4(*addr));
+		let v6 = addrs.v6().iter().map(|addr| IpAddr::V6(*addr));
 
 		match options.strategy {
-			IpStrategy::Default | IpStrategy::PreferIpv4 => {
-				Self::connect_addrs(v4.chain(v6), options, stats).await
-			}
-
+			IpStrategy::PreferIpv4 => Self::connect_addrs(v4.chain(v6), options, stats).await,
 			IpStrategy::Ipv4Only => Self::connect_addrs(v4, options, stats).await,
 			IpStrategy::Ipv6Only => Self::connect_addrs(v6, options, stats).await,
-
-			IpStrategy::PreferIpv6 => Self::connect_addrs(v6.chain(v4), options, stats).await
+			IpStrategy::Default | IpStrategy::PreferIpv6 => {
+				Self::connect_addrs(v6.chain(v4), options, stats).await
+			}
 		}
 	}
 
-	pub async fn connect_stats(options: &ConnectOptions) -> Result<(Connection, ConnectStats)> {
+	pub async fn connect_stats(options: &ConnectOptions<'_>) -> Result<(Self, ConnectStats)> {
 		let mut stats = ConnectStats::default();
 
 		let addrs = {
@@ -219,11 +224,11 @@ impl Connection {
 		};
 
 		let connection = match options.timeout {
-			None => Self::connect_to(&options, &addrs, &mut stats).await?,
-			Some(duration) => Self::connect_to(&options, &addrs, &mut stats)
+			None => Self::connect_to(options, &addrs, &mut stats).await?,
+			Some(duration) => Self::connect_to(options, &addrs, &mut stats)
 				.timeout(duration)
 				.await
-				.ok_or_else(|| Core::ConnectTimeout.as_err())??
+				.ok_or(Core::ConnectTimeout)??
 		};
 
 		if let Some(size) = options.recvbuf_size {
@@ -245,11 +250,13 @@ impl Connection {
 		Ok((connection, stats))
 	}
 
-	pub async fn connect(options: &ConnectOptions) -> Result<Connection> {
+	pub async fn connect(options: &ConnectOptions<'_>) -> Result<Self> {
 		Ok(Self::connect_stats(options).await?.0)
 	}
 
 	pub fn has_peer_hungup(&self) -> Result<bool> {
+		use poll::PollFlag;
+
 		/* error and hangup are ignored by the syscall,
 		 * we only use it to check for intersection
 		 */
@@ -260,7 +267,7 @@ impl Connection {
 		let mut fds = [BorrowedPollFd::new(self.inner.fd(), flags)];
 
 		/* we shouldn't need to handle EINTR here because the timeout is 0 */
-		if poll(&mut fds, 0)? == 0 {
+		if poll(&mut fds, Duration::ZERO)? == 0 {
 			/* no events */
 			Ok(false)
 		} else {
@@ -282,5 +289,3 @@ impl Write for Connection {
 		mut inner = inner;
 	}
 }
-
-unsafe impl SimpleSplit for Connection {}

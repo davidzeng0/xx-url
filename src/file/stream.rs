@@ -12,8 +12,8 @@ pub struct FileStream {
 
 #[asynchronous]
 impl FileStream {
-	pub async fn new(request: &Request) -> Result<FileStream> {
-		let mut file = File::open(request.url.path()).await?;
+	pub async fn new(request: &mut Request) -> Result<Self> {
+		let mut file = File::open(request.inner.finalize()?.path()).await?;
 
 		let mut start = 0;
 		let mut end = file.stream_len().await?;
@@ -32,21 +32,26 @@ impl FileStream {
 		Ok(Self { file, start, end })
 	}
 
-	fn len(&self) -> u64 {
-		self.end - self.start
+	#[must_use]
+	const fn len(&self) -> u64 {
+		#[allow(clippy::arithmetic_side_effects)]
+		(self.end - self.start)
 	}
 
-	fn pos(&self) -> u64 {
-		self.file.pos() - self.start
+	#[must_use]
+	const fn pos(&self) -> u64 {
+		#[allow(clippy::arithmetic_side_effects)]
+		(self.file.pos() - self.start)
 	}
 }
 
 #[asynchronous]
 impl Read for FileStream {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-		let remaining = (self.len() - self.pos()) as usize;
+		#[allow(clippy::arithmetic_side_effects)]
+		let remaining = self.len() - self.pos();
 
-		read_into!(buf, remaining);
+		read_into!(buf, remaining.try_into().unwrap_or(usize::MAX));
 
 		self.file.read(buf).await
 	}
@@ -56,10 +61,11 @@ impl Read for FileStream {
 impl Seek for FileStream {
 	async fn seek(&mut self, seek: SeekFrom) -> Result<u64> {
 		let pos = match seek {
-			SeekFrom::Current(rel) => self.pos().checked_add_signed(rel).unwrap(),
-			SeekFrom::Start(pos) => self.start.checked_add(pos).unwrap(),
-			SeekFrom::End(pos) => self.end.checked_add_signed(pos).unwrap()
-		};
+			SeekFrom::Current(rel) => self.pos().checked_add_signed(rel),
+			SeekFrom::Start(pos) => self.start.checked_add(pos),
+			SeekFrom::End(pos) => self.end.checked_add_signed(pos)
+		}
+		.unwrap();
 
 		let pos = pos.clamp(self.start, self.end);
 

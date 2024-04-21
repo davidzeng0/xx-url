@@ -41,7 +41,7 @@ impl Hosts {
 				let host = host.to_lowercase();
 				let name = match Name::from_str(&host) {
 					Err(err) => {
-						warn!(target: &hosts, "== Failed to parse hostname '{}': {}, skipping", host, err);
+						warn!(target: &hosts, "== Failed to parse hostname '{}': {:?}, skipping", host, err);
 
 						continue;
 					}
@@ -94,7 +94,7 @@ impl Hosts {
 impl Lookup for Hosts {
 	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
 		let results = match self.name.get(query.name()) {
-			None => return Err(Error::map_as_other(DnsError::NoData)),
+			None => return Err(DnsError::NoData.into()),
 			Some(results) => results
 		};
 
@@ -105,7 +105,7 @@ impl Lookup for Hosts {
 		};
 
 		match results {
-			None => Err(Error::map_as_other(DnsError::NoData)),
+			None => Err(DnsError::NoData.into()),
 			Some(results) => Ok(results)
 		}
 	}

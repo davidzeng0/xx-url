@@ -16,15 +16,14 @@ pub enum Op {
 }
 
 impl Op {
-	pub fn is_control(&self) -> bool {
-		match self {
-			Op::Ping | Op::Pong | Op::Close => true,
-			_ => false
-		}
+	#[must_use]
+	pub const fn is_control(self) -> bool {
+		matches!(self, Self::Ping | Self::Pong | Self::Close)
 	}
 }
 
 #[packet]
+#[allow(dead_code)]
 pub struct FrameHeader {
 	pub fin: u1,
 	pub resv: u3,

@@ -1,3 +1,5 @@
+#![allow(unreachable_pub)]
+
 use std::{fmt, str::from_utf8, time::Duration};
 
 use ::http::{Method, StatusCode};
@@ -8,28 +10,30 @@ use xx_core::{
 		*
 	},
 	coroutines::*,
-	macros::*,
-	pointer::*
+	macros::*
 };
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
-use crate::http::{stream::HttpStream, transfer::Request, HttpError, Version};
-
-mod web_socket;
-pub use web_socket::*;
-mod request;
-pub use request::{open, *};
-mod errors;
-pub use errors::*;
+use crate::http::{
+	stream::HttpStream, transfer::Request, Headers, HttpError, TryIntoHeaderName,
+	TryIntoHeaderValue, Version
+};
 
 mod consts;
-use consts::*;
+mod errors;
 mod handshake;
-use handshake::*;
+mod request;
 mod transfer;
-use transfer::*;
+mod web_socket;
 mod wire;
+
+use consts::*;
+pub use errors::*;
+use handshake::*;
+pub use request::{open, *};
+use transfer::*;
+pub use web_socket::*;
 use wire::Op;
 
 #[repr(u16)]
@@ -58,7 +62,8 @@ pub struct BorrowedFrame<'a> {
 }
 
 impl<'a> Frame {
-	pub fn text(payload: &'a str) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn text(payload: &'a str) -> BorrowedFrame<'a> {
 		BorrowedFrame {
 			op: Op::Text,
 			close_code: 0,
@@ -67,11 +72,13 @@ impl<'a> Frame {
 		}
 	}
 
-	pub fn binary(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn binary(payload: &'a [u8]) -> BorrowedFrame<'a> {
 		BorrowedFrame { op: Op::Binary, close_code: 0, payload, fin: true }
 	}
 
-	pub fn text_partial(payload: &'a str) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn text_partial(payload: &'a str) -> BorrowedFrame<'a> {
 		BorrowedFrame {
 			op: Op::Text,
 			close_code: 0,
@@ -80,19 +87,23 @@ impl<'a> Frame {
 		}
 	}
 
-	pub fn binary_partial(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn binary_partial(payload: &'a [u8]) -> BorrowedFrame<'a> {
 		BorrowedFrame { op: Op::Binary, close_code: 0, payload, fin: false }
 	}
 
-	pub fn ping(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn ping(payload: &'a [u8]) -> BorrowedFrame<'a> {
 		BorrowedFrame { op: Op::Ping, close_code: 0, payload, fin: true }
 	}
 
-	pub fn pong(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn pong(payload: &'a [u8]) -> BorrowedFrame<'a> {
 		BorrowedFrame { op: Op::Pong, close_code: 0, payload, fin: true }
 	}
 
-	pub fn close(code: u16, payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[must_use]
+	pub const fn close(code: u16, payload: &'a [u8]) -> BorrowedFrame<'a> {
 		BorrowedFrame {
 			op: Op::Close,
 			close_code: code,
@@ -126,6 +137,7 @@ impl<'a> From<&'a [u8]> for BorrowedFrame<'a> {
 	}
 }
 
+#[derive(Clone, Copy)]
 pub struct ControlFrame {
 	data: [u8; Self::MAX_LENGTH],
 	offset: u8,
@@ -135,10 +147,13 @@ pub struct ControlFrame {
 impl ControlFrame {
 	pub const MAX_LENGTH: usize = 0x7d;
 
-	pub fn new() -> Self {
+	#[allow(clippy::new_without_default)]
+	#[must_use]
+	pub const fn new() -> Self {
 		Self { data: [0; Self::MAX_LENGTH], offset: 0, length: 0 }
 	}
 
+	#[must_use]
 	pub fn data(&self) -> &[u8] {
 		&self.data[self.offset as usize..self.length as usize]
 	}
@@ -172,9 +187,9 @@ pub enum Frame {
 impl fmt::Display for Frame {
 	fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Frame::Ping(frame) => fmt.debug_tuple("Ping").field(&frame.data()).finish(),
-			Frame::Pong(frame) => fmt.debug_tuple("Pong").field(&frame.data()).finish(),
-			Frame::Close(code, frame) => {
+			Self::Ping(frame) => fmt.debug_tuple("Ping").field(&frame.data()).finish(),
+			Self::Pong(frame) => fmt.debug_tuple("Pong").field(&frame.data()).finish(),
+			Self::Close(code, frame) => {
 				let mut close = fmt.debug_struct("Close");
 
 				close.field("code", code);
@@ -187,13 +202,15 @@ impl fmt::Display for Frame {
 				close.finish()
 			}
 
-			Frame::Text(data) => fmt.debug_tuple("Text").field(&data).finish(),
-			Frame::Binary(data) => fmt.debug_tuple("Text").field(&data).finish()
+			Self::Text(data) => fmt.debug_tuple("Text").field(&data).finish(),
+			Self::Binary(data) => fmt.debug_tuple("Text").field(&data).finish()
 		}
 	}
 }
 
 pub fn mask(data: &mut [u8], mut mask: u32) {
+	/* Safety: transmute u8 to u32 is ok */
+	#[allow(unsafe_code)]
 	let (pre, align, post) = unsafe { data.align_to_mut::<u32>() };
 
 	for byte in pre.iter_mut() {

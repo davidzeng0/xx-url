@@ -1,28 +1,40 @@
 use super::*;
 
-#[compact_error]
+#[errors]
 pub enum WebSocketError {
-	ServerRejected          = (
-		ErrorKind::ConnectionRefused,
-		"WebSocket server rejected connection"
-	),
-	InvalidClientRequest    = (
-		ErrorKind::InvalidData,
-		"Invalid headers set on incoming client"
-	),
-	HandshakeTimeout        = (ErrorKind::TimedOut, "Handshake timed out"),
-	InvalidKey              = (ErrorKind::InvalidData, "Invalid WebSocket key"),
+	#[error("WebSocket server rejected connection")]
+	ServerRejected,
 
-	InvalidOpcode           = (ErrorKind::InvalidData, "Received an invalid opcode"),
-	InvalidControlFrame     = (ErrorKind::InvalidData, "Received an invalid control frame"),
-	ExpectedContinuation    = (ErrorKind::InvalidData, "Expected a continuation frame"),
-	UnexpectedContinuation  = (ErrorKind::InvalidData, "Unexpected continuation frame"),
-	ServerMasked            = (ErrorKind::InvalidData, "Received masked frame from server"),
-	MessageTooLong          = (ErrorKind::Other, "Maximum message length exceeded"),
+	#[error("Invalid headers set on incoming client")]
+	InvalidClientRequest,
 
-	UserInvalidControlFrame = (ErrorKind::InvalidInput, "Control frame too large"),
-	DataTypeMismatch        = (
-		ErrorKind::InvalidInput,
-		"Cannot send mismatching data types in chunks"
-	)
+	#[error("Handshake timed out")]
+	HandshakeTimeout,
+
+	#[error("Invalid WebSocket key")]
+	InvalidKey,
+
+	#[error("Received an invalid opcode")]
+	InvalidOpcode,
+
+	#[error("{0}")]
+	InvalidControlFrame(&'static str),
+
+	#[error("Expected a continuation frame")]
+	ExpectedContinuation,
+
+	#[error("Unexpected continuation frame")]
+	UnexpectedContinuation,
+
+	#[error("Received masked frame from server")]
+	ServerMasked,
+
+	#[error("Maximum message length exceeded")]
+	MessageTooLong,
+
+	#[error("Control frame too large")]
+	UserInvalidControlFrame,
+
+	#[error("Cannot send mismatching data types in chunks")]
+	DataTypeMismatch
 }

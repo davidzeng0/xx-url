@@ -1,8 +1,9 @@
-use std::{fmt, time::Duration};
+use std::fmt;
 
+use super::*;
 use crate::{net::connection::ConnectStats, tls};
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Copy)]
 pub struct Stats {
 	pub redirect: Option<Duration>,
 	pub connect: Option<ConnectStats>,

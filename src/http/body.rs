@@ -1,7 +1,4 @@
-use std::{collections::HashMap, mem::size_of, str::from_utf8_unchecked};
-
-use memchr::memchr;
-use xx_core::warn;
+use std::{mem::size_of, str::from_utf8};
 
 use super::*;
 
@@ -48,35 +45,32 @@ impl Body {
 			reusable: false
 		};
 
-		let bodyless = request.method == Method::HEAD ||
-			match response.status.as_u16() {
-				204 | 304 => true,
-				code => code >= 100 && code < 200
-			};
+		let bodyless = match (&request.method, response.status.as_u16()) {
+			(&Method::HEAD, _) => true,
+			(_, 204 | 304) => true,
+			(_, code) => (100..200).contains(&code)
+		};
 
 		if bodyless {
 			body.transfer = Transfer::Empty;
-		} else if let Some(encoding) = response.headers.get("transfer-encoding") {
+		} else if let Some(encoding) = response.headers.get_str(TRANSFER_ENCODING)? {
+			#[allow(clippy::redundant_closure_for_method_calls)]
 			for encoding in encoding.split(',').map(|e| e.trim()) {
-				if encoding == "chunked" {
+				if encoding.eq_ignore_ascii_case("chunked") {
 					body.transfer = Transfer::Chunks(ChunkedState::Size);
 
 					break;
 				}
 			}
-		} else if let Some(length) = response.headers.get("content-length") {
-			match u64::from_str_radix(&length, 10) {
-				Ok(len) => body.transfer = Transfer::Length(len),
-				Err(err) => {
-					return Err(Error::simple(
-						ErrorKind::InvalidData,
-						Some(format!("Invalid content length: {}", err.to_string()))
-					))
-				}
-			}
+		} else if let Some(length) = response.headers.get_str(CONTENT_LENGTH)? {
+			let len = length
+				.parse()
+				.map_err(|_| HttpError::InvalidHeader(CONTENT_LENGTH, length.to_string()))?;
+
+			body.transfer = Transfer::Length(len);
 		}
 
-		if let Some(conn) = response.headers.get("connection") {
+		if let Some(conn) = response.headers.get_str(CONNECTION)? {
 			if conn.eq_ignore_ascii_case("keep-alive") {
 				body.reusable = true;
 			}
@@ -86,7 +80,7 @@ impl Body {
 	}
 
 	async fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize> {
-		if unlikely(self.reader.buffer().len() > 0) {
+		if !self.reader.buffer().is_empty() {
 			return self.reader.read(buf).await;
 		}
 
@@ -95,41 +89,41 @@ impl Body {
 
 	async fn read_chunk_size(&mut self) -> Result<()> {
 		/* double the size of u64, double again for hex */
-		let max_hex = size_of::<u64>() * 2 * 2;
+		#[allow(clippy::arithmetic_side_effects)]
+		let max_hex = size_of::<u64>() * 2 * 2 + 1;
+		let mut index = None;
 
-		/* assumes the bufreader's capacity is < i32::MAX */
-		let mut index = 0;
+		loop {
+			let len = self.reader.buffer().len().min(max_hex);
+			let buf = &self.reader.buffer()[..len];
 
-		index += loop {
-			let new_bytes = &self.reader.buffer()[index as usize..];
+			if let Some(idx) = buf.iter().position(|x| !x.is_ascii_hexdigit()) {
+				index = Some(idx);
 
-			match new_bytes.iter().position(|x| !x.is_ascii_hexdigit()) {
-				Some(index) => break index as i32,
-				None => index += new_bytes.len() as i32
+				break;
 			}
 
-			if self.reader.buffer().len() >= max_hex {
-				break -1;
+			if len >= max_hex {
+				break;
 			}
 
 			/* fill does not discard unconsumed bytes */
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(UrlError::PartialFile.as_err());
+				return Err(UrlError::PartialFile.into());
 			}
-		};
-
-		let chunk_size = if index != -1 {
-			/* safe because all characters are ascii hexdigits */
-			let str = unsafe { from_utf8_unchecked(&self.reader.buffer()[0..index as usize]) };
-
-			u64::from_str_radix(str, 16).ok()
-		} else {
-			None
 		}
-		.ok_or_else(|| Error::simple(ErrorKind::InvalidData, Some("Chunk size overflowed")))?;
 
-		/* index can't be negative here */
-		self.reader.consume(index as usize);
+		let chunk_size = index
+			.and_then(|index| {
+				let str = from_utf8(&self.reader.buffer()[0..index]).unwrap();
+				let size = u64::from_str_radix(str, 16).ok();
+
+				self.reader.consume(index);
+
+				size
+			})
+			.ok_or(HttpError::ChunkTooLarge)?;
+
 		self.transfer = Transfer::Chunks(ChunkedState::Extension(chunk_size));
 
 		Ok(())
@@ -140,6 +134,7 @@ impl Body {
 			match memchr(b'\n', self.reader.buffer()) {
 				None => self.reader.discard(),
 				Some(index) => {
+					#[allow(clippy::arithmetic_side_effects)]
 					self.reader.consume(index + 1);
 
 					break;
@@ -147,7 +142,7 @@ impl Body {
 			};
 
 			if unlikely(self.reader.fill().await? == 0) {
-				return Err(UrlError::PartialFile.as_err());
+				return Err(UrlError::PartialFile.into());
 			}
 		}
 
@@ -172,15 +167,16 @@ impl Body {
 				}
 
 				ChunkedState::Data(mut remaining) => {
-					read_into!(buf, remaining as usize);
+					read_into!(buf, remaining.try_into().unwrap_or(usize::MAX));
 
 					let read = self.read_bytes(buf).await?;
 
 					if unlikely(read == 0) {
-						return Err(UrlError::PartialFile.as_err());
+						return Err(UrlError::PartialFile.into());
 					}
 
-					remaining -= read as u64;
+					#[allow(clippy::arithmetic_side_effects)]
+					(remaining -= read as u64);
 
 					self.transfer = if remaining == 0 {
 						Transfer::Chunks(ChunkedState::Trailer)
@@ -203,57 +199,40 @@ impl Body {
 	}
 
 	pub async fn read_trailer(
-		&mut self, out_key: &mut String, out_val: &mut String
-	) -> Result<Option<usize>> {
-		if self.transfer != Transfer::Trailers {
-			return Err(Error::simple(
-				ErrorKind::Other,
-				Some(
-					"Invalid state: either there is data left in the body or the stream has been \
-					 exhausted"
-				)
-			));
+		&mut self
+	) -> Result<Option<(HeaderName, Option<HeaderValue>, usize)>> {
+		assert!(
+			self.transfer == Transfer::Trailers,
+			"There is either is data left in the body or the stream has been exhausted"
+		);
+
+		let header = read_header_line_limited(&mut self.reader).await?;
+
+		if header.is_none() {
+			self.transfer = Transfer::Empty;
 		}
 
-		Ok(match read_header_line_limited(&mut self.reader).await? {
-			None => {
-				self.transfer = Transfer::Empty;
-
-				None
-			}
-
-			Some((key, value, read)) => {
-				*out_key = key;
-				*out_val = value.unwrap_or_else(|| {
-					warn!(target: self, "== Header separator not found");
-
-					"".to_string()
-				});
-
-				Some(read)
-			}
-		})
+		Ok(header)
 	}
 
-	pub async fn read_trailers(&mut self) -> Result<HashMap<String, String>> {
-		let mut headers = HashMap::new();
+	pub async fn read_trailers(&mut self) -> Result<Headers> {
+		let mut headers = Headers::new();
 
-		loop {
-			let mut key = String::new();
-			let mut value = String::new();
+		while let Some((key, value, _)) = self.read_trailer().await? {
+			let value = value.unwrap_or_else(|| {
+				warn!(target: &*self, "== Header separator not found");
 
-			match self.read_trailer(&mut key, &mut value).await? {
-				None => break,
-				Some(_) => ()
-			}
+				HeaderValue::from_static("")
+			});
 
-			headers.insert(key, value);
+			headers.insert(key, value)?;
 		}
 
 		Ok(headers)
 	}
 
-	pub fn remaining(&self) -> Option<u64> {
+	#[must_use]
+	pub const fn remaining(&self) -> Option<u64> {
 		match self.transfer {
 			Transfer::Empty => Some(0),
 			Transfer::Length(remaining) => Some(remaining),
@@ -286,20 +265,21 @@ impl Read for Body {
 			Transfer::Length(remaining) => {
 				let mut remaining = *remaining;
 
-				read_into!(buf, remaining as usize);
+				read_into!(buf, remaining.try_into().unwrap_or(usize::MAX));
 
 				let read = self.read_bytes(buf).await?;
 
 				if unlikely(read == 0) {
-					return Err(UrlError::PartialFile.as_err());
+					return Err(UrlError::PartialFile.into());
 				}
 
-				remaining -= read as u64;
+				#[allow(clippy::arithmetic_side_effects)]
+				(remaining -= read as u64);
 
-				self.transfer = if remaining == 0 {
-					Transfer::Empty
-				} else {
+				self.transfer = if remaining > 0 {
 					Transfer::Length(remaining)
+				} else {
+					Transfer::Empty
 				};
 
 				Ok(read)

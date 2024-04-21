@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use xx_core::error::Result;
@@ -11,10 +13,10 @@ async fn test_dns() -> Result<()> {
 
 	let ips = resolver.resolve_ips("www.example.com").await?;
 
-	assert_eq!(ips.v4(), &["93.184.216.34".parse::<Ipv4Addr>().unwrap()]);
+	assert_eq!(ips.v4(), &["93.184.215.14".parse::<Ipv4Addr>().unwrap()]);
 	assert_eq!(
 		ips.v6(),
-		&["2606:2800:220:1:248:1893:25c8:1946"
+		&["2606:2800:21f:cb07:6820:80da:af6b:8b2c"
 			.parse::<Ipv6Addr>()
 			.unwrap()]
 	);

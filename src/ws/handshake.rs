@@ -17,7 +17,7 @@ impl Key {
 
 		STANDARD
 			.decode_slice(val.as_bytes(), &mut data)
-			.map_err(|_| WebSocketError::InvalidKey.as_err())?;
+			.map_err(|_| WebSocketError::InvalidKey)?;
 
 		Ok(Self { data })
 	}

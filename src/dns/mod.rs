@@ -13,7 +13,6 @@ use hickory_proto::{
 	xfer::DnsResponse
 };
 use resolv_conf::Config as ResolveConfig;
-use thiserror::Error;
 use xx_core::{
 	async_std::{io::*, AsyncIteratorExt},
 	macros::duration
@@ -21,18 +20,20 @@ use xx_core::{
 
 use super::*;
 
-mod config;
+pub mod config;
+pub mod hosts;
+pub mod lookup;
+pub mod name_server;
+pub mod resolver;
+
 pub use config::*;
-mod hosts;
 pub use hosts::*;
-mod lookup;
 pub use lookup::*;
-mod name_server;
 pub use name_server::*;
-mod resolver;
 pub use resolver::*;
 
-#[derive(Debug, Error)]
+#[errors]
+#[allow(clippy::large_enum_variant, variant_size_differences)]
 pub enum DnsError {
 	#[error("No data")]
 	NoData,

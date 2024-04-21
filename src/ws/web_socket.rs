@@ -4,20 +4,19 @@ use std::{
 	net::{SocketAddr, ToSocketAddrs}
 };
 
-use enumflags2::make_bitflags;
 use num_traits::FromPrimitive;
 use xx_core::{
 	async_std::AsyncIterator,
 	debug,
-	os::{poll::PollFlag, socket::Shutdown}
+	os::{epoll::PollFlag, socket::Shutdown}
 };
 
 use super::{
-	transfer::connect,
 	wire::{FrameHeaderPacket, MutableFrameHeaderPacket},
 	*
 };
 
+#[derive(Clone, Copy)]
 pub struct FrameHeader {
 	fin: bool,
 	op: Op,
@@ -27,15 +26,14 @@ pub struct FrameHeader {
 
 #[asynchronous]
 async fn decode_length(len: u8, reader: &mut impl BufRead) -> Result<u64> {
-	if len < 0x7e {
-		Ok(len as u64)
-	} else if len == 0x7e {
-		Ok(reader.read_u16_be_or_err().await? as u64)
-	} else {
-		Ok(reader.read_u64_be_or_err().await?)
-	}
+	Ok(match len {
+		len if len < 0x7e => len as u64,
+		0x7e => reader.read_u16_be_or_err().await? as u64,
+		_ => reader.read_u64_be_or_err().await?
+	})
 }
 
+#[allow(clippy::checked_conversions, clippy::cast_possible_truncation)]
 fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 	if len < 0x7e {
 		Ok(len as u8)
@@ -77,13 +75,13 @@ impl FrameHeader {
 	}
 
 	fn write(&self, writer: &mut Cursor<&mut [u8]>) -> Result<()> {
-		let pos = writer.position() as usize;
+		let pos = writer.position().try_into().unwrap();
 
+		#[allow(clippy::arithmetic_side_effects)]
 		writer.set_position((pos + MutableFrameHeaderPacket::minimum_packet_size()) as u64);
 
 		let len = encode_len(self.len, writer)?;
-		let mut flags =
-			MutableFrameHeaderPacket::new(&mut writer.get_mut()[pos as usize..]).unwrap();
+		let mut flags = MutableFrameHeaderPacket::new(&mut writer.get_mut()[pos..]).unwrap();
 
 		flags.set_fin(self.fin as u8);
 		flags.set_resv(0);
@@ -107,7 +105,7 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
 	pub async fn read_frame_header(&mut self) -> Result<Option<FrameHeader>> {
 		if !self.web_socket.can_read() {
-			return Err(Core::Shutdown.as_err());
+			return Err(Core::Shutdown.into());
 		}
 
 		let frame = match FrameHeader::read(&mut self.web_socket.stream).await? {
@@ -120,34 +118,34 @@ impl<'a> Reader<'a> {
 		};
 
 		if frame.op == Op::Invalid {
-			return Err(WebSocketError::InvalidOpcode.as_err());
+			return Err(WebSocketError::InvalidOpcode.into());
 		}
 
 		if frame.op.is_control() {
 			if !frame.fin {
-				return Err(WebSocketError::InvalidControlFrame
-					.as_err_with_msg("Fin not set on control frame"));
+				return Err(
+					WebSocketError::InvalidControlFrame("Fin not set on control frame").into()
+				);
 			}
 
 			if frame.len > 0x7d {
-				return Err(
-					WebSocketError::InvalidControlFrame.as_err_with_msg("Control frame too long")
-				);
+				return Err(WebSocketError::InvalidControlFrame("Control frame too long").into());
 			}
 		} else {
 			if self.web_socket.expect_continuation != (frame.op == Op::Continuation) {
-				if self.web_socket.expect_continuation {
-					return Err(WebSocketError::ExpectedContinuation.as_err());
+				return Err(if self.web_socket.expect_continuation {
+					WebSocketError::ExpectedContinuation
 				} else {
-					return Err(WebSocketError::UnexpectedContinuation.as_err());
+					WebSocketError::UnexpectedContinuation
 				}
+				.into());
 			}
 
 			self.web_socket.expect_continuation = !frame.fin;
 		}
 
 		if frame.mask.is_some() && self.web_socket.is_client {
-			return Err(WebSocketError::ServerMasked.as_err());
+			return Err(WebSocketError::ServerMasked.into());
 		}
 
 		if frame.op == Op::Close {
@@ -161,15 +159,16 @@ impl<'a> Reader<'a> {
 		loop {
 			let available = self.web_socket.stream.buffer().len();
 
-			if header.len > available as u64 {
-				header.len -= available as u64;
+			if let Some(remaining) = header.len.checked_sub(available as u64) {
+				header.len = remaining;
 
 				self.web_socket.stream.discard();
 
 				if self.web_socket.stream.fill().await? == 0 {
-					return Err(Core::UnexpectedEof.as_err());
+					return Err(Core::UnexpectedEof.into());
 				}
 			} else {
+				#[allow(clippy::cast_possible_truncation)]
 				self.web_socket.stream.consume(header.len as usize);
 
 				header.len = 0;
@@ -184,21 +183,14 @@ impl<'a> Reader<'a> {
 	async fn stream_read_frame_data(
 		stream: &mut impl BufRead, header: &mut FrameHeader, buf: &mut [u8]
 	) -> Result<usize> {
-		read_into!(buf, header.len as usize);
+		read_into!(buf, header.len.try_into().unwrap_or(usize::MAX));
 
-		match stream.read_exact(buf).await {
-			Ok(_) => {
-				header.len -= buf.len() as u64;
+		let read = stream.read_exact(buf).await?;
 
-				return Ok(buf.len());
-			}
+		#[allow(clippy::arithmetic_side_effects)]
+		(header.len -= read as u64);
 
-			Err(err) => Err(if err.kind() == ErrorKind::UnexpectedEof {
-				Core::UnexpectedEof.as_err()
-			} else {
-				err
-			})
-		}
+		Ok(read)
 	}
 
 	pub async fn read_frame_data(
@@ -207,7 +199,8 @@ impl<'a> Reader<'a> {
 		Self::stream_read_frame_data(&mut self.web_socket.stream, header, buf).await
 	}
 
-	pub fn frames(self) -> Frames<'a> {
+	#[must_use]
+	pub const fn frames(self) -> Frames<'a> {
 		Frames { reader: self }
 	}
 }
@@ -228,14 +221,20 @@ impl<'a> Frames<'a> {
 			}
 		};
 
+		if frame.len > self.reader.web_socket.max_message_length {
+			return Err(WebSocketError::MessageTooLong.into());
+		}
+
 		if frame.op.is_control() {
 			let mut control = ControlFrame::new();
 
-			control.length = ControlFrame::MAX_LENGTH as u8;
-			control.length = self
-				.reader
+			#[allow(clippy::cast_possible_truncation)]
+			(control.length = frame.len as u8);
+
+			self.reader
 				.read_frame_data(&mut frame, control.data_mut())
-				.await? as u8;
+				.await?;
+
 			if let Some(m) = &frame.mask {
 				mask(control.data_mut(), *m);
 			}
@@ -246,8 +245,8 @@ impl<'a> Frames<'a> {
 				Op::Close => {
 					let mut code = CloseCode::NoStatusCode as u16;
 
-					if control.data().len() >= 2 {
-						code = u16::from_be_bytes(control.data()[0..2].try_into().unwrap());
+					if let Some(data) = control.data().get(0..2) {
+						code = u16::from_be_bytes(data.try_into().unwrap());
 						control.offset = 2;
 					}
 
@@ -270,36 +269,32 @@ impl<'a> Frames<'a> {
 				.web_socket
 				.max_message_length
 				.checked_sub(buf.len() as u64)
-				.and_then(|len| len.checked_sub(frame.len))
-				.ok_or_else(|| WebSocketError::MessageTooLong.as_err())?;
-			buf.reserve(frame.len as usize);
+				.and_then(|remaining| remaining.checked_sub(frame.len))
+				.ok_or(WebSocketError::MessageTooLong)?;
 
-			unsafe {
-				let start = buf.len();
-				let end = start + frame.len as usize;
-				let read = buf.get_unchecked_mut(start..end);
+			let start = buf.len();
+			let end = start.checked_add(frame.len.try_into().unwrap()).unwrap();
 
-				Reader::stream_read_frame_data(stream, &mut frame, read).await?;
+			buf.resize(end, 0);
 
-				if let Some(m) = &frame.mask {
-					mask(read, *m);
-				}
+			let data = &mut buf[start..];
 
-				buf.set_len(end);
+			Reader::stream_read_frame_data(stream, &mut frame, data).await?;
+
+			if let Some(m) = &frame.mask {
+				mask(data, *m);
 			}
 
-			Ok(if !frame.fin {
-				None
-			} else {
+			Ok(if frame.fin {
 				let (op, buf) = current_message.take().unwrap();
 
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
-					Op::Text => {
-						Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8.as_err())?)
-					}
+					Op::Text => Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8)?),
 					_ => unreachable!()
 				})
+			} else {
+				None
 			})
 		}
 	}
@@ -314,7 +309,7 @@ impl<'a> Frames<'a> {
 }
 
 #[asynchronous]
-impl<'a> AsyncIterator for Frames<'a> {
+impl AsyncIterator for Frames<'_> {
 	type Item = Result<Frame>;
 
 	async fn next(&mut self) -> Option<Self::Item> {
@@ -332,12 +327,14 @@ pub struct Writer<'a> {
 
 #[asynchronous]
 impl<'a> Writer<'a> {
+	#[allow(clippy::impl_trait_in_params)]
 	pub async fn send_frame<'b>(&mut self, frame: impl Into<BorrowedFrame<'b>>) -> Result<()> {
 		if !self.web_socket.can_write() {
-			return Err(Core::Shutdown.as_err());
+			return Err(Core::Shutdown.into());
 		}
 
 		let frame = frame.into();
+
 		let mut header = FrameHeader {
 			fin: frame.fin,
 			op: frame.op,
@@ -350,17 +347,16 @@ impl<'a> Writer<'a> {
 		}
 
 		if header.op.is_control() {
-			if header.op == Op::Close {
-				header.len += 2;
-			}
+			let additional = if header.op == Op::Close { 2 } else { 0 };
 
-			if header.len > 0x7d {
-				return Err(WebSocketError::UserInvalidControlFrame.as_err());
+			#[allow(clippy::arithmetic_side_effects)]
+			if header.len > 0x7d - additional {
+				return Err(WebSocketError::UserInvalidControlFrame.into());
 			}
 		} else {
 			if let Some(op) = self.web_socket.last_sent_message_op {
 				if op != header.op {
-					return Err(WebSocketError::DataTypeMismatch.as_err());
+					return Err(WebSocketError::DataTypeMismatch.into());
 				}
 
 				header.op = Op::Continuation;
@@ -383,6 +379,7 @@ impl<'a> Writer<'a> {
 				writer.write_all(&frame.close_code.to_be_bytes()).unwrap();
 			}
 
+			#[allow(clippy::cast_possible_truncation)]
 			let len = writer.position() as usize;
 
 			&bytes[0..len]
@@ -396,8 +393,9 @@ impl<'a> Writer<'a> {
 			.write_all_vectored(data)
 			.await?;
 
+		#[allow(clippy::arithmetic_side_effects)]
 		if wrote < header.len() + frame.payload.len() {
-			return Err(Core::UnexpectedEof.as_err());
+			return Err(Core::UnexpectedEof.into());
 		}
 
 		if frame.op == Op::Close {
@@ -426,7 +424,7 @@ pub struct WebSocket {
 
 #[asynchronous]
 impl WebSocket {
-	fn _new(stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool) -> Self {
+	fn from(stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool) -> Self {
 		Self {
 			stream,
 
@@ -442,14 +440,15 @@ impl WebSocket {
 		}
 	}
 
-	pub async fn new(request: &WsRequest) -> Result<Self> {
+	pub async fn new(request: &mut WsRequest) -> Result<Self> {
 		let stream = connect(request).await?;
 
-		Ok(Self::_new(stream, &request.options, true))
+		Ok(Self::from(stream, &request.options, true))
 	}
 
+	#[must_use]
 	pub fn server(stream: BufReader<HttpStream>, options: &WebSocketOptions) -> Self {
-		Self::_new(stream, options, false)
+		Self::from(stream, options, false)
 	}
 
 	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
@@ -491,15 +490,15 @@ impl WebSocket {
 		if self.close_state.get() == Some(Shutdown::Both) {
 			self.stream.inner().shutdown(Shutdown::Write).await?;
 
-			match self
+			if self
 				.stream
 				.inner()
-				.poll(make_bitflags!(PollFlag::{RdHangUp}))
+				.poll(PollFlag::RdHangUp.into())
 				.timeout(self.close_timeout)
 				.await
+				.is_none()
 			{
-				None => debug!(target: self, "== Close was not clean"),
-				_ => ()
+				debug!(target: &*self, "== Close was not clean");
 			}
 		}
 
@@ -512,13 +511,6 @@ impl WebSocket {
 
 	pub fn writer(&mut self) -> Writer<'_> {
 		Writer { web_socket: self }
-	}
-
-	/// Safety: same thread
-	pub fn split(&mut self) -> (Reader<'_>, Writer<'_>) {
-		let this = MutPtr::from(self);
-
-		unsafe { (this.as_mut().reader(), this.as_mut().writer()) }
 	}
 }
 
@@ -541,23 +533,27 @@ impl WebSocketHandle {
 		let stream = handle_upgrade(self.stream, &server)
 			.timeout(self.options.handshake_timeout)
 			.await
-			.ok_or_else(|| WebSocketError::HandshakeTimeout.as_err())??;
+			.ok_or(WebSocketError::HandshakeTimeout)??;
 
 		Ok(WebSocket::server(stream, &self.options))
 	}
 }
 
+#[asynchronous(task)]
 impl Task for WebSocketHandle {
-	type Output = Result<WebSocket>;
+	type Output<'a> = Result<WebSocket>;
 
-	fn run(self, context: Ptr<Context>) -> Self::Output {
-		unsafe { with_context(context, self.accept_websocket()) }
+	async fn run(self) -> Result<WebSocket> {
+		self.accept_websocket().await
 	}
 }
 
 #[asynchronous]
 impl WebSocketServer {
-	pub async fn bind<A: ToSocketAddrs>(addrs: A, options: WebSocketOptions) -> Result<Self> {
+	pub async fn bind<A>(addrs: A, options: WebSocketOptions) -> Result<Self>
+	where
+		A: ToSocketAddrs
+	{
 		let listener = Tcp::bind(addrs).await?;
 
 		Ok(Self { listener, options })
@@ -567,7 +563,7 @@ impl WebSocketServer {
 		let (socket, _) = self.listener.accept().await?;
 		let stream = HttpStream::new(socket);
 
-		Ok(WebSocketHandle { stream, options: self.options.clone() })
+		Ok(WebSocketHandle { stream, options: self.options })
 	}
 
 	pub async fn local_addr(&self) -> Result<SocketAddr> {
