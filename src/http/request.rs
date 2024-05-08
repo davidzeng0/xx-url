@@ -31,6 +31,10 @@ impl HttpRequest {
 
 		#[chain]
 		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
+
+		#[chain]
+		#[allow(clippy::impl_trait_in_params)]
+		pub fn payload(&mut self, payload: impl Into<Payload>) -> &mut Self;
 	}
 
 	pub async fn run(&mut self) -> Result<Response> {
@@ -61,6 +65,16 @@ fn new_request(url: impl AsRef<str>, method: Method) -> HttpRequest {
 }
 
 #[must_use]
-pub fn get(url: &str) -> HttpRequest {
+#[allow(clippy::impl_trait_in_params)]
+pub fn get(url: impl AsRef<str>) -> HttpRequest {
 	new_request(url, Method::GET)
+}
+
+#[must_use]
+#[allow(clippy::impl_trait_in_params)]
+pub fn post(url: impl AsRef<str>, payload: impl Into<Payload>) -> HttpRequest {
+	let mut request = new_request(url, Method::POST);
+
+	request.payload(payload);
+	request
 }

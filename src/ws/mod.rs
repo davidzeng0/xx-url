@@ -16,7 +16,7 @@ use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
 use crate::http::{
-	stream::HttpStream, transfer::Request, Headers, HttpError, TryIntoHeaderName,
+	stream::HttpStream, transfer::Request, Headers, HttpError, Payload, TryIntoHeaderName,
 	TryIntoHeaderValue, Version
 };
 

@@ -66,6 +66,10 @@ impl WsRequest {
 
 		#[chain]
 		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
+
+		#[chain]
+		#[allow(clippy::impl_trait_in_params)]
+		pub fn payload(&mut self, payload: impl Into<Payload>) -> &mut Self;
 	}
 
 	pub async fn run(&mut self) -> Result<WebSocket> {
@@ -97,7 +101,8 @@ impl Task for WsRequest {
 	}
 }
 
-pub fn open(url: &str) -> Result<WsRequest> {
+#[allow(clippy::impl_trait_in_params)]
+pub fn open(url: impl AsRef<str>) -> Result<WsRequest> {
 	let request = RequestBase::new(url, |scheme| matches!(scheme, "ws" | "wss"));
 	let mut inner = Request::new(request, Method::GET);
 

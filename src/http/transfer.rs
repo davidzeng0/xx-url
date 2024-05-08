@@ -53,7 +53,8 @@ pub struct Request {
 	pub(crate) options: Options,
 	pub(crate) request: RequestBase,
 	pub(crate) method: Method,
-	pub(crate) headers: Headers
+	pub(crate) headers: Headers,
+	pub(crate) body: Option<Payload>
 }
 
 impl Request {
@@ -62,7 +63,8 @@ impl Request {
 			options: Options::new(),
 			request,
 			method,
-			headers: Headers::new()
+			headers: Headers::new(),
+			body: None
 		}
 	}
 
@@ -101,26 +103,18 @@ impl Request {
 		self.options.sendbuf_size = Some(size);
 		self
 	}
-}
 
-struct HttpConnection {
-	stream: HttpStream,
-	buf: Vec<u8>
-}
-
-impl HttpConnection {
-	pub fn new(stream: HttpStream) -> Self {
-		Self {
-			stream,
-			buf: Vec::with_capacity(DEFAULT_BUFFER_SIZE)
-		}
+	#[allow(clippy::impl_trait_in_params)]
+	pub fn payload(&mut self, payload: impl Into<Payload>) -> &mut Self {
+		self.body = Some(payload.into());
+		self
 	}
 }
 
 #[asynchronous]
 async fn get_connection_for(
 	request: &Request, url: &Url, _connection_pool: /* TOOD */ Option<()>
-) -> Result<(HttpConnection, Option<Stats>)> {
+) -> Result<(HttpStream, Option<Stats>)> {
 	let mut options = ConnectOptions::new(
 		url.host_str().unwrap(),
 		url.port().unwrap_or(request.options.port)
@@ -158,17 +152,18 @@ async fn get_connection_for(
 		(HttpStream::new(conn), stats.into())
 	};
 
-	Ok((HttpConnection::new(stream), Some(stats)))
+	Ok((stream, Some(stats)))
 }
 
 #[asynchronous]
 #[allow(clippy::impl_trait_in_params)]
-pub async fn send_request(
-	writer: &mut impl Write, request: &Request, url: &Url, version: Version
+async fn send_request(
+	writer: &mut BufWriter<impl Write>, request: &Request, version: Version, url: &Url,
+	body: &mut Option<Payload>
 ) -> Result<()> {
 	macro_rules! http_write {
 		($writer: expr, $($arg: tt)*) => {{
-			trace!(target: request, "<< {}", format_args!($($arg)*));
+			trace!(target: &*request, "<< {}", format_args!($($arg)*));
 
 			$writer.write_fmt(format_args!("{}\r\n", format_args!($($arg)*)))
 		}};
@@ -195,11 +190,21 @@ pub async fn send_request(
 		trace!(target: request, "<< {}: {}", key.as_str(), value.to_str().unwrap_or("<binary>"));
 
 		writer.write_fmt(format_args!("{}: ", key.as_str())).await?;
-		writer.write_exact(value.as_bytes()).await?;
-		writer.write_string_all_or_err("\r\n").await?;
+		writer.write_all(value.as_bytes()).await?;
+		writer.write_string("\r\n").await?;
 	}
 
 	writer.write_string("\r\n").await?;
+
+	if let Some(Payload(body)) = body {
+		let _ = match body {
+			PayloadRepr::Bytes(bytes) => writer.write_all(bytes).await?,
+			PayloadRepr::Stream(stream) => writer.write_from(stream.as_mut()).await?
+		};
+
+		check_interrupt().await?;
+	}
+
 	writer.flush().await?;
 
 	Ok(())
@@ -405,6 +410,7 @@ pub async fn transfer(
 
 	let req_url = request.request.url().unwrap();
 
+	let mut body = request.body.take();
 	let mut url = req_url;
 
 	let mut redirected_url = None;
@@ -415,25 +421,24 @@ pub async fn transfer(
 	loop {
 		debug!(target: &*request, "== Starting request for '{}'", url.as_str());
 
+		response_headers.clear();
+
 		let (conn, stats) = get_connection_for(request, url, connection_pool).await?;
 		let mut stats = stats.unwrap_or_else(Stats::default);
 
-		let (stream, mut buf, _) = {
-			let mut writer = BufWriter::from_parts(conn.stream, conn.buf, 0);
+		let conn = {
+			let mut writer = BufWriter::new(conn);
 			let stall = Instant::now();
 
-			send_request(&mut writer, request, url, version).await?;
+			send_request(&mut writer, request, version, url, &mut body).await?;
 
 			stats.stall = stall.elapsed();
-			writer.into_parts()
+			writer.into_parts().0
 		};
-
-		buf.clear();
-		response_headers.clear();
 
 		let (mut response, reader) = {
 			let start = Instant::now();
-			let mut reader = BufReader::from_parts(stream, buf, 0);
+			let mut reader = BufReader::new(conn);
 
 			reader.fill().await?;
 			stats.wait = start.elapsed();
@@ -485,6 +490,7 @@ pub async fn transfer(
 			}
 		}
 
+		request.body = body;
 		response.url = redirected_url;
 
 		break Ok((response, reader));

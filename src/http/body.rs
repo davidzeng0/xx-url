@@ -84,7 +84,7 @@ impl Body {
 			return self.reader.read(buf).await;
 		}
 
-		self.reader.inner().read(buf).await
+		self.reader.inner_mut().read(buf).await
 	}
 
 	async fn read_chunk_size(&mut self) -> Result<()> {

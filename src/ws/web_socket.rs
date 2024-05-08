@@ -28,8 +28,8 @@ pub struct FrameHeader {
 async fn decode_length(len: u8, reader: &mut impl BufRead) -> Result<u64> {
 	Ok(match len {
 		len if len < 0x7e => len as u64,
-		0x7e => reader.read_u16_be_or_err().await? as u64,
-		_ => reader.read_u64_be_or_err().await?
+		0x7e => reader.read_u16_be().await? as u64,
+		_ => reader.read_u64_be().await?
 	})
 }
 
@@ -53,7 +53,7 @@ fn encode_len(len: u64, writer: &mut Cursor<&mut [u8]>) -> Result<u8> {
 #[asynchronous]
 impl FrameHeader {
 	async fn read(reader: &mut impl BufRead) -> Result<Option<Self>> {
-		let flags: [u8; 2] = match reader.read_type().await? {
+		let flags: [u8; 2] = match reader.try_read_type().await? {
 			Some(flags) => flags,
 			None => return Ok(None)
 		};
@@ -61,7 +61,7 @@ impl FrameHeader {
 		let wire = FrameHeaderPacket::new(&flags).unwrap();
 		let len = decode_length(wire.get_len(), reader).await?;
 		let mask = if wire.get_masked() != 0 {
-			Some(reader.read_u32_be_or_err().await?)
+			Some(reader.read_u32_be().await?)
 		} else {
 			None
 		};
@@ -185,7 +185,7 @@ impl<'a> Reader<'a> {
 	) -> Result<usize> {
 		read_into!(buf, header.len.try_into().unwrap_or(usize::MAX));
 
-		let read = stream.read_exact(buf).await?;
+		let read = stream.read_fully(buf).await?;
 
 		#[allow(clippy::arithmetic_side_effects)]
 		(header.len -= read as u64);
@@ -389,7 +389,7 @@ impl<'a> Writer<'a> {
 		let wrote = self
 			.web_socket
 			.stream
-			.inner()
+			.inner_mut()
 			.write_all_vectored(data)
 			.await?;
 
@@ -475,7 +475,7 @@ impl WebSocket {
 			.is_some_and(|state| state != Shutdown::Read)
 	}
 
-	fn shutdown(&mut self, how: Shutdown) {
+	fn shutdown(&self, how: Shutdown) {
 		/* this is the only shared value when split. prevent caching */
 		let close_state = self.close_state.get();
 
@@ -488,11 +488,11 @@ impl WebSocket {
 
 	async fn maybe_close(&mut self) -> Result<()> {
 		if self.close_state.get() == Some(Shutdown::Both) {
-			self.stream.inner().shutdown(Shutdown::Write).await?;
+			self.stream.inner_mut().shutdown(Shutdown::Write).await?;
 
 			if self
 				.stream
-				.inner()
+				.inner_mut()
 				.poll(PollFlag::RdHangUp.into())
 				.timeout(self.close_timeout)
 				.await

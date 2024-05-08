@@ -197,3 +197,34 @@ impl<'a> IntoIterator for &'a mut Headers {
 		self.iter_mut()
 	}
 }
+
+enum PayloadRepr {
+	Bytes(Box<[u8]>),
+	Stream(Box<dyn Read>)
+}
+
+pub struct Payload(PayloadRepr);
+
+impl From<&[u8]> for Payload {
+	fn from(value: &[u8]) -> Self {
+		Self(PayloadRepr::Bytes(value.into()))
+	}
+}
+
+impl From<Vec<u8>> for Payload {
+	fn from(value: Vec<u8>) -> Self {
+		Self(PayloadRepr::Bytes(value.into()))
+	}
+}
+
+impl From<Box<dyn Read>> for Payload {
+	fn from(value: Box<dyn Read>) -> Self {
+		Self(PayloadRepr::Stream(value))
+	}
+}
+
+impl<T: Read + 'static> From<Box<T>> for Payload {
+	fn from(value: Box<T>) -> Self {
+		Self(PayloadRepr::Stream(value))
+	}
+}
