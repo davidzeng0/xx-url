@@ -5,10 +5,10 @@ use std::{
 	time::{Duration, Instant}
 };
 
-use enumflags2::{make_bitflags, BitFlags};
 use xx_core::{
 	async_std::io::*,
 	debug,
+	enumflags2::{make_bitflags, BitFlags},
 	macros::wrapper_functions,
 	os::{
 		epoll::PollFlag,

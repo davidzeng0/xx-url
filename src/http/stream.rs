@@ -1,5 +1,5 @@
-use enumflags2::BitFlags;
 use xx_core::{
+	enumflags2::BitFlags,
 	macros::wrapper_functions,
 	os::{epoll::PollFlag, socket::Shutdown}
 };

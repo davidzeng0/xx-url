@@ -6,13 +6,13 @@ use std::{
 	time::{Duration, Instant}
 };
 
-use enumflags2::BitFlags;
 use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
 use xx_core::{
 	async_std::io::*,
 	coroutines::{get_context, scoped, Context},
 	debug,
+	enumflags2::BitFlags,
 	macros::wrapper_functions,
 	os::{
 		epoll::PollFlag,
