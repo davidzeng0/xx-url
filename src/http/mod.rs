@@ -4,12 +4,12 @@ use std::{
 };
 
 use ::http::{header::*, Method, StatusCode};
-use memchr::memchr;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use xx_core::{
 	async_std::io::{typed::*, *},
 	debug,
+	memchr::memchr,
 	opt::hint::*,
 	trace, warn
 };

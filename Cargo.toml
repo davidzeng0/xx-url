@@ -7,19 +7,18 @@ edition = "2021"
 base64 = "0.22.1"
 http = "1.1.0"
 num-derive = "0.4.2"
-num-traits = "0.2.18"
+num-traits = "0.2.19"
 rand = "0.8.5"
 resolv-conf = "0.7.0"
-rustls = { version = "0.23.5", default-features = false, features = ["std", "tls12", "ring"] }
+rustls = { version = "0.23.8", default-features = false, features = ["std", "tls12", "ring"] }
 rustls-pemfile = "2.1.2"
-hickory-proto = { version = "0.24.1", default-features = false }
 url = "2.5.0"
-x509-parser = "0.15.1"
-memchr = "2.7.2"
+x509-parser = "0.16.0"
 rust-crypto = "0.2.36"
-pnet_macros = "0.34.0"
-thiserror = "1.0.59"
-pnet_macros_support = "0.34.0"
+pnet_macros = "0.35.0"
+thiserror = "1.0.61"
+pnet_macros_support = "0.35.0"
+simple-dns = "0.7.0"
 xx-core = { git = "https://github.com/davidzeng0/xx-core.git" }
 xx-pulse = { git = "https://github.com/davidzeng0/xx-pulse.git" }
 
@@ -40,6 +39,7 @@ variant_size_differences = "warn"
 unsafe_code = "warn"
 
 [lints.clippy]
+field_reassign_with_default = "allow"
 arithmetic_side_effects = "warn"
 cast_possible_truncation = "warn"
 cast_possible_wrap = "warn"

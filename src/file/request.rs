@@ -37,7 +37,7 @@ impl Request {
 
 #[asynchronous(task)]
 impl Task for Request {
-	type Output<'a> = Result<FileStream>;
+	type Output<'ctx> = Result<FileStream>;
 
 	async fn run(mut self) -> Result<FileStream> {
 		FileStream::new(&mut self).await

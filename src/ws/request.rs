@@ -1,17 +1,16 @@
 use super::*;
 use crate::net::connection::IpStrategy;
 
-const DEFAULT_MAX_MESSAGE_LENGTH: u64 = 128 * 1024 * 1024;
+const DEFAULT_MAX_MESSAGE_LENGTH: usize = 128 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 pub struct WebSocketOptions {
 	pub(super) handshake_timeout: Duration,
-	pub(super) max_message_length: u64,
+	pub(super) max_message_length: usize,
 	pub(super) close_timeout: Duration
 }
 
 impl WebSocketOptions {
-	#[allow(clippy::new_without_default)]
 	#[must_use]
 	pub const fn new() -> Self {
 		Self {
@@ -26,7 +25,7 @@ impl WebSocketOptions {
 		self
 	}
 
-	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
+	pub fn set_max_message_length(&mut self, max: usize) -> &mut Self {
 		self.max_message_length = max;
 		self
 	}
@@ -34,6 +33,12 @@ impl WebSocketOptions {
 	pub fn set_close_timeout(&mut self, timeout: Duration) -> &mut Self {
 		self.close_timeout = timeout;
 		self
+	}
+}
+
+impl Default for WebSocketOptions {
+	fn default() -> Self {
+		Self::new()
 	}
 }
 
@@ -81,7 +86,7 @@ impl WsRequest {
 		self
 	}
 
-	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
+	pub fn set_max_message_length(&mut self, max: usize) -> &mut Self {
 		self.options.set_max_message_length(max);
 		self
 	}
@@ -94,7 +99,7 @@ impl WsRequest {
 
 #[asynchronous(task)]
 impl Task for WsRequest {
-	type Output<'a> = Result<WebSocket>;
+	type Output<'ctx> = Result<WebSocket>;
 
 	async fn run(mut self) -> Result<WebSocket> {
 		WebSocket::new(&mut self).await

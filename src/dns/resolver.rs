@@ -24,11 +24,11 @@ impl LookupIp {
 		this
 	}
 
-	fn push_records(&mut self, records: &Vec<Record>) {
+	fn push_records(&mut self, records: &[Record<'_>]) {
 		for record in records {
-			match record.data() {
-				Some(RData::A(ip)) => self.v4.push((*ip).into()),
-				Some(RData::AAAA(ip)) => self.v6.push((*ip).into()),
+			match &record.rdata {
+				RData::A(ip) => self.v4.push(ip.address.into()),
+				RData::AAAA(ip) => self.v6.push(ip.address.into()),
 				_ => ()
 			}
 		}
@@ -68,12 +68,23 @@ impl Resolver {
 		Ok(this)
 	}
 
-	async fn resolve_ips_lookup(&self, name: &Name) -> Result<LookupIp> {
-		let a = Query::query(name.clone(), RecordType::A);
-		let aaaa = Query::query(name.clone(), RecordType::AAAA);
-
+	async fn resolve_ips_lookup(&self, name: &Name<'_>) -> Result<LookupIp> {
 		let mut error = None;
 		let mut result = LookupIp::default();
+
+		let a = Query::new(
+			name.clone(),
+			QueryType::TYPE(RecordType::A),
+			QueryClass::CLASS(DnsClass::IN),
+			false
+		);
+
+		let aaaa = Query::new(
+			name.clone(),
+			QueryType::TYPE(RecordType::AAAA),
+			QueryClass::CLASS(DnsClass::IN),
+			false
+		);
 
 		for _ in 0..3 {
 			for service in &self.services {
@@ -82,7 +93,7 @@ impl Resolver {
 
 				match a {
 					Ok(results) => {
-						result.push_records(results.records());
+						result.push_records(&results.records);
 						success = true;
 					}
 
@@ -91,7 +102,7 @@ impl Resolver {
 
 				match aaaa {
 					Ok(results) => {
-						result.push_records(results.records());
+						result.push_records(&results.records);
 						success = true;
 					}
 
@@ -117,7 +128,8 @@ impl Resolver {
 			}
 		}
 
-		let name = Name::from_str(&name.to_lowercase()).map_err(Error::map)?;
+		let name = name.to_lowercase();
+		let name = Name::new(&name).map_err(DnsError::Other)?;
 		let now = Instant::now();
 
 		debug!(target: self, "<< Lookup {}", name);

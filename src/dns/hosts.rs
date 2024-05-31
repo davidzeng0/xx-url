@@ -2,13 +2,14 @@ use xx_core::warn;
 
 use super::*;
 
+#[derive(Default)]
 struct Results {
-	a: Option<LookupResults>,
-	aaaa: Option<LookupResults>
+	a: Vec<Record<'static>>,
+	aaaa: Vec<Record<'static>>
 }
 
 pub struct Hosts {
-	name: HashMap<Name, Results>
+	name: HashMap<Name<'static>, Results>
 }
 
 #[asynchronous]
@@ -28,59 +29,35 @@ impl Hosts {
 			let mut tokens = line.split_whitespace();
 
 			let ip = tokens.next().unwrap();
-			let ip = match ip.parse() {
-				Ok(ip) => ip,
-				Err(_) => {
-					warn!(target: &hosts, "== Failed to parse ip '{}', skipping", ip);
+			let Ok(ip) = ip.parse() else {
+				warn!(target: &hosts, "== Failed to parse ip '{}', skipping", ip);
 
-					continue;
-				}
+				continue;
 			};
 
 			for host in tokens {
 				let host = host.to_lowercase();
-				let name = match Name::from_str(&host) {
+				let name = match Name::new(&host) {
+					Ok(name) => name.into_owned(),
 					Err(err) => {
 						warn!(target: &hosts, "== Failed to parse hostname '{}': {:?}, skipping", host, err);
 
 						continue;
 					}
-
-					Ok(name) => name
 				};
 
-				let (query, rdata) = match ip {
-					IpAddr::V4(addr) => (
-						Query::query(name.clone(), RecordType::A),
-						RData::A(addr.into())
-					),
+				let results = hosts.name.entry(name.clone()).or_default();
 
-					IpAddr::V6(addr) => (
-						Query::query(name.clone(), RecordType::AAAA),
-						RData::AAAA(addr.into())
-					)
+				let rdata = match ip {
+					IpAddr::V4(addr) => RData::A(addr.into()),
+					IpAddr::V6(addr) => RData::AAAA(addr.into())
 				};
 
-				let record = Record::from_rdata(name.clone(), 0, rdata.clone());
+				let record = Record::new(name, DnsClass::IN, 0, rdata);
 
-				let results = hosts
-					.name
-					.entry(name)
-					.or_insert_with(|| Results { a: None, aaaa: None });
-
-				match query.query_type() {
-					RecordType::A => results
-						.a
-						.get_or_insert_with(|| LookupResults::new(query, vec![], None))
-						.records_mut()
-						.push(record),
-
-					RecordType::AAAA => results
-						.aaaa
-						.get_or_insert_with(|| LookupResults::new(query, vec![], None))
-						.records_mut()
-						.push(record),
-
+				match &record.rdata {
+					RData::A(_) => results.a.push(record),
+					RData::AAAA(_) => results.aaaa.push(record),
 					_ => unreachable!()
 				}
 			}
@@ -92,21 +69,22 @@ impl Hosts {
 
 #[asynchronous]
 impl Lookup for Hosts {
-	async fn lookup(&self, query: &Query) -> Result<LookupResults> {
-		let results = match self.name.get(query.name()) {
+	async fn lookup(&self, query: &Query<'_>) -> Result<Answer> {
+		let results = match self.name.get(&query.qname) {
 			None => return Err(DnsError::NoData.into()),
 			Some(results) => results
 		};
 
-		let results = match query.query_type() {
-			RecordType::A => results.a.clone(),
-			RecordType::AAAA => results.aaaa.clone(),
+		let results = match query.qtype {
+			QueryType::TYPE(RecordType::A) => Some(results.a.clone()),
+			QueryType::TYPE(RecordType::AAAA) => Some(results.aaaa.clone()),
 			_ => None
 		};
 
-		match results {
-			None => Err(DnsError::NoData.into()),
-			Some(results) => Ok(results)
+		if let Some(records) = results {
+			Ok(Answer::new(query.clone().into_owned(), records, None))
+		} else {
+			Err(DnsError::NoData.into())
 		}
 	}
 }

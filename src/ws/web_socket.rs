@@ -221,7 +221,7 @@ impl<'a> Frames<'a> {
 			}
 		};
 
-		if frame.len > self.reader.web_socket.max_message_length {
+		if frame.len > self.reader.web_socket.max_message_length as u64 {
 			return Err(WebSocketError::MessageTooLong.into());
 		}
 
@@ -268,12 +268,14 @@ impl<'a> Frames<'a> {
 			self.reader
 				.web_socket
 				.max_message_length
-				.checked_sub(buf.len() as u64)
-				.and_then(|remaining| remaining.checked_sub(frame.len))
+				.checked_sub(buf.len())
+				.and_then(|remaining| (remaining as u64).checked_sub(frame.len))
 				.ok_or(WebSocketError::MessageTooLong)?;
 
 			let start = buf.len();
-			let end = start.checked_add(frame.len.try_into().unwrap()).unwrap();
+
+			#[allow(clippy::cast_possible_truncation)]
+			let end = start.checked_add(frame.len as usize).unwrap();
 
 			buf.resize(end, 0);
 
@@ -411,7 +413,7 @@ pub struct WebSocket {
 	stream: BufReader<HttpStream>,
 
 	/* request options */
-	max_message_length: u64,
+	max_message_length: usize,
 	close_timeout: Duration,
 
 	last_sent_message_op: Option<Op>,
@@ -451,7 +453,7 @@ impl WebSocket {
 		Self::from(stream, options, false)
 	}
 
-	pub fn set_max_message_length(&mut self, max: u64) -> &mut Self {
+	pub fn set_max_message_length(&mut self, max: usize) -> &mut Self {
 		self.max_message_length = max;
 		self
 	}
@@ -511,6 +513,16 @@ impl WebSocket {
 
 	pub fn writer(&mut self) -> Writer<'_> {
 		Writer { web_socket: self }
+	}
+
+	#[must_use]
+	pub fn frames(&mut self) -> Frames<'_> {
+		self.reader().frames()
+	}
+
+	#[allow(clippy::impl_trait_in_params)]
+	pub async fn send_frame<'b>(&mut self, frame: impl Into<BorrowedFrame<'b>>) -> Result<()> {
+		self.writer().send_frame(frame).await
 	}
 }
 

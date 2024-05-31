@@ -1,18 +1,15 @@
 use std::{
 	collections::HashMap,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-	str::FromStr,
 	time::{Duration, Instant}
 };
 
-use hickory_proto::{
-	error::ProtoError,
-	op::*,
-	rr::{rdata::SOA, resource::RecordRef, *},
-	serialize::binary::BinDecodable,
-	xfer::DnsResponse
-};
 use resolv_conf::Config as ResolveConfig;
+use simple_dns::{
+	rdata::RData, Name, Packet, PacketFlag, Question as Query, ResourceRecord as Record,
+	SimpleDnsError, CLASS as DnsClass, QCLASS as QueryClass, QTYPE as QueryType,
+	RCODE as ResponseCode, TYPE as RecordType
+};
 use xx_core::{
 	async_std::{io::*, AsyncIteratorExt},
 	macros::duration
@@ -38,13 +35,13 @@ pub enum DnsError {
 	#[error("No data")]
 	NoData,
 
-	#[error("No records for {:?}", query)]
+	#[error("No records")]
 	NoRecords {
-		query: Query,
-		soa: Option<Record<SOA>>,
+		queries: Vec<Query<'static>>,
+		soa: Option<Record<'static>>,
 		response_code: ResponseCode
 	},
 
-	#[error("Proto error")]
-	Proto(#[from] ProtoError)
+	#[error(transparent)]
+	Other(#[from] SimpleDnsError)
 }

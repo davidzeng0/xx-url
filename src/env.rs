@@ -1,11 +1,7 @@
-use std::{
-	cell::OnceCell,
-	sync::{Arc, Mutex},
-	time::Instant
-};
+use std::{cell::OnceCell, sync::Arc, time::Instant};
 
 use rustls::ClientConfig;
-use xx_core::debug;
+use xx_core::{async_std::sync::Mutex, debug, lazy_static::lazy_static};
 
 use super::*;
 use crate::{dns::Resolver, tls::certs::load_system_certs};
@@ -22,7 +18,9 @@ struct ThreadLocalData {
 	tls_client_config: Arc<ClientConfig>
 }
 
-static GLOBAL_DATA: Mutex<Option<GlobalData>> = Mutex::new(None);
+lazy_static! {
+	static ref GLOBAL_DATA: Mutex<Option<GlobalData>> = Mutex::new(None);
+}
 
 thread_local! {
 	static THREAD_LOCAL_DATA: OnceCell<ThreadLocalData> = const { OnceCell::new() };
@@ -60,15 +58,13 @@ async fn create_global_data() -> GlobalData {
 
 #[asynchronous]
 async fn get_global_data() -> GlobalData {
-	if let Some(config) = &*GLOBAL_DATA.lock().unwrap() {
+	let mut global = GLOBAL_DATA.lock().await.unwrap();
+
+	if let Some(config) = &*global {
 		return config.clone();
 	}
 
-	let data = create_global_data().await;
-
-	*GLOBAL_DATA.lock().unwrap() = Some(data.clone());
-
-	data
+	global.insert(create_global_data().await).clone()
 }
 
 #[asynchronous]
@@ -124,8 +120,9 @@ pub async fn get_resolver() -> Arc<Resolver> {
 }
 
 #[allow(clippy::missing_panics_doc)]
-pub fn free_data() {
-	GLOBAL_DATA.lock().unwrap().take();
+#[asynchronous]
+pub async fn free_data() {
+	GLOBAL_DATA.lock().await.unwrap().take();
 
 	debug!("-- Uninitialized shared data");
 }

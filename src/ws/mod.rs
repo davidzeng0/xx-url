@@ -54,16 +54,22 @@ pub enum CloseCode {
 	TlsHandshakeFailure = 1015
 }
 
-pub struct BorrowedFrame<'a> {
+impl From<CloseCode> for u16 {
+	fn from(value: CloseCode) -> Self {
+		value as Self
+	}
+}
+
+pub struct BorrowedFrame<'payload> {
 	op: Op,
 	close_code: u16,
-	payload: &'a [u8],
+	payload: &'payload [u8],
 	fin: bool
 }
 
-impl<'a> Frame {
+impl<'payload> Frame {
 	#[must_use]
-	pub const fn text(payload: &'a str) -> BorrowedFrame<'a> {
+	pub const fn text(payload: &'payload str) -> BorrowedFrame<'payload> {
 		BorrowedFrame {
 			op: Op::Text,
 			close_code: 0,
@@ -73,12 +79,12 @@ impl<'a> Frame {
 	}
 
 	#[must_use]
-	pub const fn binary(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	pub const fn binary(payload: &'payload [u8]) -> BorrowedFrame<'payload> {
 		BorrowedFrame { op: Op::Binary, close_code: 0, payload, fin: true }
 	}
 
 	#[must_use]
-	pub const fn text_partial(payload: &'a str) -> BorrowedFrame<'a> {
+	pub const fn text_partial(payload: &'payload str) -> BorrowedFrame<'payload> {
 		BorrowedFrame {
 			op: Op::Text,
 			close_code: 0,
@@ -88,33 +94,34 @@ impl<'a> Frame {
 	}
 
 	#[must_use]
-	pub const fn binary_partial(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	pub const fn binary_partial(payload: &'payload [u8]) -> BorrowedFrame<'payload> {
 		BorrowedFrame { op: Op::Binary, close_code: 0, payload, fin: false }
 	}
 
 	#[must_use]
-	pub const fn ping(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	pub const fn ping(payload: &'payload [u8]) -> BorrowedFrame<'payload> {
 		BorrowedFrame { op: Op::Ping, close_code: 0, payload, fin: true }
 	}
 
 	#[must_use]
-	pub const fn pong(payload: &'a [u8]) -> BorrowedFrame<'a> {
+	pub const fn pong(payload: &'payload [u8]) -> BorrowedFrame<'payload> {
 		BorrowedFrame { op: Op::Pong, close_code: 0, payload, fin: true }
 	}
 
 	#[must_use]
-	pub const fn close(code: u16, payload: &'a [u8]) -> BorrowedFrame<'a> {
+	#[allow(clippy::impl_trait_in_params)]
+	pub fn close(code: impl Into<u16>, payload: &'payload [u8]) -> BorrowedFrame<'payload> {
 		BorrowedFrame {
 			op: Op::Close,
-			close_code: code,
+			close_code: code.into(),
 			payload,
 			fin: true
 		}
 	}
 }
 
-impl<'a> From<&'a Frame> for BorrowedFrame<'a> {
-	fn from(frame: &'a Frame) -> Self {
+impl<'payload> From<&'payload Frame> for BorrowedFrame<'payload> {
+	fn from(frame: &'payload Frame) -> Self {
 		match frame {
 			Frame::Ping(frame) => Frame::ping(frame.as_ref()),
 			Frame::Pong(frame) => Frame::pong(frame.as_ref()),
@@ -125,14 +132,14 @@ impl<'a> From<&'a Frame> for BorrowedFrame<'a> {
 	}
 }
 
-impl<'a> From<&'a str> for BorrowedFrame<'a> {
-	fn from(value: &'a str) -> Self {
+impl<'payload> From<&'payload str> for BorrowedFrame<'payload> {
+	fn from(value: &'payload str) -> Self {
 		Frame::text(value)
 	}
 }
 
-impl<'a> From<&'a [u8]> for BorrowedFrame<'a> {
-	fn from(value: &'a [u8]) -> Self {
+impl<'payload> From<&'payload [u8]> for BorrowedFrame<'payload> {
+	fn from(value: &'payload [u8]) -> Self {
 		Frame::binary(value)
 	}
 }
@@ -147,7 +154,6 @@ pub struct ControlFrame {
 impl ControlFrame {
 	pub const MAX_LENGTH: usize = 0x7d;
 
-	#[allow(clippy::new_without_default)]
 	#[must_use]
 	pub const fn new() -> Self {
 		Self { data: [0; Self::MAX_LENGTH], offset: 0, length: 0 }
@@ -160,6 +166,12 @@ impl ControlFrame {
 
 	pub fn data_mut(&mut self) -> &mut [u8] {
 		&mut self.data[self.offset as usize..self.length as usize]
+	}
+}
+
+impl Default for ControlFrame {
+	fn default() -> Self {
+		Self::new()
 	}
 }
 
@@ -209,7 +221,7 @@ impl fmt::Display for Frame {
 }
 
 pub fn mask(data: &mut [u8], mut mask: u32) {
-	/* Safety: transmute u8 to u32 is ok */
+	/* Safety: transmute u8x4 to u32x1 is ok */
 	#[allow(unsafe_code)]
 	let (pre, align, post) = unsafe { data.align_to_mut::<u32>() };
 

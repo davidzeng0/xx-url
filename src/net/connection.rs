@@ -39,9 +39,9 @@ pub enum IpStrategy {
 	PreferIpv6
 }
 
-pub struct ConnectOptions<'a> {
+pub struct ConnectOptions<'host> {
 	resolver: Arc<Resolver>,
-	host: &'a str,
+	host: &'host str,
 	port: u16,
 	strategy: IpStrategy,
 	timeout: Option<Duration>,
@@ -51,14 +51,14 @@ pub struct ConnectOptions<'a> {
 	tcp_keepalive: Option<i32>
 }
 
-impl<'a> ConnectOptions<'a> {
+impl<'host> ConnectOptions<'host> {
 	#[asynchronous]
-	pub async fn new(host: &'a str, port: u16) -> Self {
+	pub async fn new(host: &'host str, port: u16) -> Self {
 		Self::with_resolver(get_resolver().await, host, port)
 	}
 
 	#[must_use]
-	pub fn with_resolver(resolver: Arc<Resolver>, host: &'a str, port: u16) -> Self {
+	pub fn with_resolver(resolver: Arc<Resolver>, host: &'host str, port: u16) -> Self {
 		Self {
 			resolver,
 			host,
@@ -74,7 +74,7 @@ impl<'a> ConnectOptions<'a> {
 	}
 
 	#[must_use]
-	pub const fn host(&self) -> &'a str {
+	pub const fn host(&self) -> &'host str {
 		self.host
 	}
 
