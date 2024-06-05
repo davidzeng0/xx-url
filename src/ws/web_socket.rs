@@ -68,7 +68,7 @@ impl FrameHeader {
 
 		Ok(Some(Self {
 			fin: wire.get_fin() != 0,
-			op: Op::from_u8(wire.get_op()).unwrap_or(Op::Invalid),
+			op: Op::from_u8(wire.get_op()).unwrap_or_default(),
 			mask,
 			len
 		}))

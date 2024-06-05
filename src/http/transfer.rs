@@ -424,7 +424,7 @@ pub async fn transfer(
 		response_headers.clear();
 
 		let (conn, stats) = get_connection_for(request, url, connection_pool).await?;
-		let mut stats = stats.unwrap_or_else(Stats::default);
+		let mut stats = stats.unwrap_or_default();
 
 		let conn = {
 			let mut writer = BufWriter::new(conn);
