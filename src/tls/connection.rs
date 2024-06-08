@@ -151,7 +151,7 @@ impl TlsConn {
 
 					let _ = self.tls.write_tls(&mut adapter);
 
-					return Err(Error::map(err));
+					return Err(Error::new(err));
 				}
 			}
 
@@ -161,7 +161,9 @@ impl TlsConn {
 
 			match (eof, handshaking, self.tls.is_handshaking()) {
 				(_, true, false) | (_, false, _) => break,
-				(true, true, true) => return Err(Core::UnexpectedEof.into()),
+				(true, true, true) => {
+					return Err(fmt_error!("EOF during TLS handshake" @ ErrorKind::UnexpectedEof))
+				}
 				(..) => ()
 			}
 		}
@@ -203,8 +205,8 @@ impl TlsConn {
 	pub async fn connect_stats_config(
 		options: &ConnectOptions<'_>, config: Arc<ClientConfig>
 	) -> Result<(Self, ConnectStats)> {
-		let server_name = options.host().to_string().try_into().map_err(Error::map)?;
-		let tls = ClientConnection::new(config, server_name).map_err(Error::map)?;
+		let server_name = options.host().to_string().try_into().map_err(Error::new)?;
+		let tls = ClientConnection::new(config, server_name).map_err(Error::new)?;
 
 		let (connection, stats) = Connection::connect_stats(options).await?;
 
@@ -236,7 +238,7 @@ impl TlsConn {
 		match read(&mut self.tls) {
 			Ok(0) => (),
 			Ok(n) => return Ok(n),
-			Err(err) if err.kind() == ErrorKind::WouldBlock => (),
+			Err(err) if err.kind() == io::ErrorKind::WouldBlock => (),
 			Err(err) => return Err(err.into())
 		}
 
@@ -249,7 +251,7 @@ impl TlsConn {
 				return Ok(0);
 			}
 
-			let state = self.tls.process_new_packets().map_err(Error::map)?;
+			let state = self.tls.process_new_packets().map_err(Error::new)?;
 
 			if state.plaintext_bytes_to_read() == 0 {
 				check_interrupt().await?;

@@ -105,7 +105,7 @@ pub struct Reader<'a> {
 impl<'a> Reader<'a> {
 	pub async fn read_frame_header(&mut self) -> Result<Option<FrameHeader>> {
 		if !self.web_socket.can_read() {
-			return Err(Core::Shutdown.into());
+			return Err(ErrorKind::Shutdown.into());
 		}
 
 		let frame = match FrameHeader::read(&mut self.web_socket.stream).await? {
@@ -165,7 +165,7 @@ impl<'a> Reader<'a> {
 				self.web_socket.stream.discard();
 
 				if self.web_socket.stream.fill().await? == 0 {
-					return Err(Core::UnexpectedEof.into());
+					return Err(ErrorKind::UnexpectedEof.into());
 				}
 			} else {
 				#[allow(clippy::cast_possible_truncation)]
@@ -292,7 +292,9 @@ impl<'a> Frames<'a> {
 
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
-					Op::Text => Frame::Text(String::from_utf8(buf).map_err(|_| Core::InvalidUtf8)?),
+					Op::Text => {
+						Frame::Text(String::from_utf8(buf).map_err(|_| ErrorKind::invalid_utf8())?)
+					}
 					_ => unreachable!()
 				})
 			} else {
@@ -332,7 +334,7 @@ impl<'a> Writer<'a> {
 	#[allow(clippy::impl_trait_in_params)]
 	pub async fn send_frame<'b>(&mut self, frame: impl Into<BorrowedFrame<'b>>) -> Result<()> {
 		if !self.web_socket.can_write() {
-			return Err(Core::Shutdown.into());
+			return Err(ErrorKind::Shutdown.into());
 		}
 
 		let frame = frame.into();
@@ -397,7 +399,7 @@ impl<'a> Writer<'a> {
 
 		#[allow(clippy::arithmetic_side_effects)]
 		if wrote < header.len() + frame.payload.len() {
-			return Err(Core::UnexpectedEof.into());
+			return Err(ErrorKind::UnexpectedEof.into());
 		}
 
 		if frame.op == Op::Close {

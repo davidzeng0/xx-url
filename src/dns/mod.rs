@@ -33,9 +33,11 @@ pub use resolver::*;
 #[allow(clippy::large_enum_variant, variant_size_differences)]
 pub enum DnsError {
 	#[error("No data")]
+	#[kind = ErrorKind::NoData]
 	NoData,
 
 	#[error("No records")]
+	#[kind = ErrorKind::NoData]
 	NoRecords {
 		queries: Vec<Query<'static>>,
 		soa: Option<Record<'static>>,
@@ -43,5 +45,9 @@ pub enum DnsError {
 	},
 
 	#[error(transparent)]
-	Other(#[from] SimpleDnsError)
+	Other(
+		#[from]
+		#[source]
+		SimpleDnsError
+	)
 }

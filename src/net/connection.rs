@@ -228,7 +228,7 @@ impl Connection {
 			Some(duration) => Self::connect_to(options, &addrs, &mut stats)
 				.timeout(duration)
 				.await
-				.ok_or(Core::ConnectTimeout)??
+				.ok_or(ErrorKind::connect_timed_out())??
 		};
 
 		if let Some(size) = options.recvbuf_size {

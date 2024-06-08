@@ -3,12 +3,13 @@ use std::{
 	time::{Duration, Instant}
 };
 
-use ::http::{header::*, Method, StatusCode};
+use ::http::{header::*, Method};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use xx_core::{
 	async_std::io::{typed::*, *},
 	debug,
+	macros::wrapper_functions,
 	memchr::memchr,
 	opt::hint::*,
 	trace, warn
@@ -24,6 +25,7 @@ pub mod stats;
 pub(crate) mod stream;
 pub(crate) mod transfer;
 
+pub use ::http::StatusCode;
 pub use body::*;
 pub use error::*;
 pub use request::*;
@@ -150,7 +152,7 @@ impl Headers {
 		};
 
 		Ok(match self.0.get(key) {
-			Some(value) => Some(value.to_str().map_err(|_| Core::InvalidUtf8)?),
+			Some(value) => Some(value.to_str().map_err(|_| ErrorKind::invalid_utf8())?),
 			None => None
 		})
 	}

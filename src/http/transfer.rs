@@ -238,11 +238,11 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		return if offset == reader.capacity() {
 			Err(HttpError::HeadersTooLong.into())
 		} else {
-			Err(Core::UnexpectedEof.into())
+			Err(ErrorKind::UnexpectedEof.into())
 		};
 	}
 
-	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| Core::InvalidUtf8)?;
+	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| ErrorKind::invalid_utf8())?;
 
 	if let Some(ln) = line.strip_suffix('\n') {
 		line = ln;
@@ -348,7 +348,7 @@ pub async fn parse_response(
 
 		while reader.buffer().len() < prefix.len() {
 			if reader.fill().await? == 0 {
-				return Err(Core::UnexpectedEof.into());
+				return Err(ErrorKind::UnexpectedEof.into());
 			}
 		}
 

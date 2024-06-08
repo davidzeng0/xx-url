@@ -15,15 +15,15 @@ async fn test_http() -> Result<()> {
 
 	let mut response = http::get("https://www.google.com").await?;
 
-	response.text().await?;
+	response.bytes().await?;
 
 	let mut response = http::get("http://www.google.com").await?;
 
-	response.text().await?;
+	response.bytes().await?;
 
 	let mut response = http::get("http://www.example.com").await?;
 
-	response.text().await?;
+	response.bytes().await?;
 
 	Ok(())
 }

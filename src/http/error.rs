@@ -33,23 +33,30 @@ impl From<Vec<u8>> for HeaderRepr {
 #[errors]
 pub enum HttpError {
 	#[error("Headers too long")]
+	#[kind = ErrorKind::InvalidData]
 	HeadersTooLong,
 
-	#[error("Invalid HTTP status line: {0}")]
+	#[error("Invalid HTTP status line: {}", f0)]
+	#[kind = ErrorKind::InvalidData]
 	InvalidStatusLine(String),
 
-	#[error("Invalid header name {0:?}")]
+	#[error("Invalid header name {:?}", f0)]
+	#[kind = ErrorKind::InvalidData]
 	InvalidHeaderName(HeaderRepr),
 
-	#[error("Invalid header value {0:?}")]
+	#[error("Invalid header value {:?}", f0)]
+	#[kind = ErrorKind::InvalidData]
 	InvalidHeaderValue(HeaderRepr),
 
-	#[error("Invalid value for header '{0}': {1}")]
+	#[error("Invalid value for header '{}': {}", f0, f1)]
+	#[kind = ErrorKind::InvalidData]
 	InvalidHeader(HeaderName, String),
 
 	#[error("Chunk too large")]
+	#[kind = ErrorKind::Overflow]
 	ChunkTooLarge,
 
-	#[error("Unexpected version {0}")]
+	#[error("Unexpected version {}", f0)]
+	#[kind = ErrorKind::InvalidData]
 	UnexpectedVersion(Version)
 }

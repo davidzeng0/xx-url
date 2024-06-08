@@ -16,7 +16,6 @@ url = "2.5.0"
 x509-parser = "0.16.0"
 rust-crypto = "0.2.36"
 pnet_macros = "0.35.0"
-thiserror = "1.0.61"
 pnet_macros_support = "0.35.0"
 simple-dns = "0.7.0"
 xx-core = { git = "https://github.com/davidzeng0/xx-core.git" }

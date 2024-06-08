@@ -12,7 +12,7 @@ pub struct Config {
 impl Config {
 	pub async fn new() -> Result<Self> {
 		let data = File::load(resolver_conf_path()).await?;
-		let config = ResolveConfig::parse(data).map_err(Error::map)?;
+		let config = ResolveConfig::parse(data).map_err(Error::new)?;
 
 		let mut name_servers = Vec::new();
 
