@@ -91,15 +91,15 @@ impl Body {
 		/* double the size of u64, double again for hex */
 		#[allow(clippy::arithmetic_side_effects)]
 		let max_hex = size_of::<u64>() * 2 * 2 + 1;
-		let mut index = None;
+		let mut index;
 
 		loop {
 			let len = self.reader.buffer().len().min(max_hex);
 			let buf = &self.reader.buffer()[..len];
 
-			if let Some(idx) = buf.iter().position(|x| !x.is_ascii_hexdigit()) {
-				index = Some(idx);
+			index = buf.iter().position(|x| !x.is_ascii_hexdigit());
 
+			if index.is_some() {
 				break;
 			}
 
@@ -132,13 +132,14 @@ impl Body {
 	async fn read_until_newline(&mut self) -> Result<()> {
 		loop {
 			match memchr(b'\n', self.reader.buffer()) {
-				None => self.reader.discard(),
 				Some(index) => {
 					#[allow(clippy::arithmetic_side_effects)]
 					self.reader.consume(index + 1);
 
 					break;
 				}
+
+				None => self.reader.discard()
 			};
 
 			if unlikely(self.reader.fill().await? == 0) {

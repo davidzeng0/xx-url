@@ -58,7 +58,7 @@ impl<'host> ConnectOptions<'host> {
 	}
 
 	#[must_use]
-	pub fn with_resolver(resolver: Arc<Resolver>, host: &'host str, port: u16) -> Self {
+	pub const fn with_resolver(resolver: Arc<Resolver>, host: &'host str, port: u16) -> Self {
 		Self {
 			resolver,
 			host,

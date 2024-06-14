@@ -428,7 +428,9 @@ pub struct WebSocket {
 
 #[asynchronous]
 impl WebSocket {
-	fn from(stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool) -> Self {
+	const fn from(
+		stream: BufReader<HttpStream>, options: &WebSocketOptions, is_client: bool
+	) -> Self {
 		Self {
 			stream,
 
@@ -451,7 +453,7 @@ impl WebSocket {
 	}
 
 	#[must_use]
-	pub fn server(stream: BufReader<HttpStream>, options: &WebSocketOptions) -> Self {
+	pub const fn server(stream: BufReader<HttpStream>, options: &WebSocketOptions) -> Self {
 		Self::from(stream, options, false)
 	}
 
