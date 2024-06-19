@@ -193,7 +193,7 @@ impl Connection {
 			}
 		}
 
-		Err(error.unwrap())
+		Err(error.unwrap_or_else(|| ErrorKind::no_addrs().into()))
 	}
 
 	async fn connect_to(
