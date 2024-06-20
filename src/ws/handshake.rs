@@ -1,5 +1,7 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
-use crypto::{digest::Digest, sha1::Sha1};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+use crypto::digest::Digest;
+use crypto::sha1::Sha1;
 
 use super::*;
 

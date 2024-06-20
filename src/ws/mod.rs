@@ -1,24 +1,21 @@
 #![allow(unreachable_pub)]
 
-use std::{fmt, str::from_utf8, time::Duration};
+use std::fmt;
+use std::str::from_utf8;
+use std::time::Duration;
 
 use ::http::{Method, StatusCode};
 use num_derive::FromPrimitive;
-use xx_core::{
-	async_std::io::{
-		typed::{BufReadTyped, WriteTyped},
-		*
-	},
-	coroutines::*,
-	macros::*
-};
+use xx_core::async_std::io::typed::{BufReadTyped, WriteTyped};
+use xx_core::async_std::io::*;
+use xx_core::coroutines::*;
+use xx_core::macros::*;
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
-use crate::http::{
-	stream::HttpStream, transfer::Request, Headers, HttpError, Payload, TryIntoHeaderName,
-	TryIntoHeaderValue, Version
-};
+use crate::http::stream::HttpStream;
+use crate::http::transfer::Request;
+use crate::http::{Headers, HttpError, Payload, TryIntoHeaderName, TryIntoHeaderValue, Version};
 
 mod consts;
 mod errors;

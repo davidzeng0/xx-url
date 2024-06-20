@@ -1,4 +1,5 @@
-use xx_core::{coroutines::Task, macros::wrapper_functions};
+use xx_core::coroutines::Task;
+use xx_core::macros::wrapper_functions;
 
 use super::*;
 use crate::net::connection::IpStrategy;

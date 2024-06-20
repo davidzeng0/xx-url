@@ -1,7 +1,8 @@
 use std::fmt;
 
 use super::*;
-use crate::{net::connection::ConnectStats, tls};
+use crate::net::connection::ConnectStats;
+use crate::tls;
 
 #[derive(Default, Clone, Copy)]
 pub struct Stats {

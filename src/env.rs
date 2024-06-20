@@ -1,10 +1,15 @@
-use std::{cell::OnceCell, sync::Arc, time::Instant};
+use std::cell::OnceCell;
+use std::sync::Arc;
+use std::time::Instant;
 
 use rustls::ClientConfig;
-use xx_core::{async_std::sync::Mutex, debug, lazy_static::lazy_static};
+use xx_core::async_std::sync::Mutex;
+use xx_core::debug;
+use xx_core::lazy_static::lazy_static;
 
 use super::*;
-use crate::{dns::Resolver, tls::certs::load_system_certs};
+use crate::dns::Resolver;
+use crate::tls::certs::load_system_certs;
 
 #[derive(Clone)]
 struct GlobalData {

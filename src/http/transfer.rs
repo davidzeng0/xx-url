@@ -5,7 +5,8 @@ use std::str::{from_utf8, FromStr};
 use url::Position;
 
 use super::*;
-use crate::{net::connection::*, tls::connection::TlsConn};
+use crate::net::connection::*;
+use crate::tls::connection::TlsConn;
 
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */

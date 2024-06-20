@@ -1,20 +1,15 @@
-use std::{
-	cell::Cell,
-	io::{Cursor, IoSlice, Write},
-	net::{SocketAddr, ToSocketAddrs}
-};
+use std::cell::Cell;
+use std::io::{Cursor, IoSlice, Write};
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use num_traits::FromPrimitive;
-use xx_core::{
-	async_std::AsyncIterator,
-	debug,
-	os::{epoll::PollFlag, socket::Shutdown}
-};
+use xx_core::async_std::AsyncIterator;
+use xx_core::debug;
+use xx_core::os::epoll::PollFlag;
+use xx_core::os::socket::Shutdown;
 
-use super::{
-	wire::{FrameHeaderPacket, MutableFrameHeaderPacket},
-	*
-};
+use super::wire::{FrameHeaderPacket, MutableFrameHeaderPacket};
+use super::*;
 
 #[derive(Clone, Copy)]
 pub struct FrameHeader {

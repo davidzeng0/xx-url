@@ -1,4 +1,5 @@
-use std::{mem::size_of, str::from_utf8};
+use std::mem::size_of;
+use std::str::from_utf8;
 
 use super::*;
 

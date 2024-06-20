@@ -1,19 +1,16 @@
-use std::{
-	fmt,
-	time::{Duration, Instant}
-};
+use std::fmt;
+use std::time::{Duration, Instant};
 
-use ::http::{header::*, Method};
+use ::http::header::*;
+use ::http::Method;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use xx_core::{
-	async_std::io::{typed::*, *},
-	debug,
-	macros::wrapper_functions,
-	memchr::memchr,
-	opt::hint::*,
-	trace, warn
-};
+use xx_core::async_std::io::typed::*;
+use xx_core::async_std::io::*;
+use xx_core::macros::wrapper_functions;
+use xx_core::memchr::memchr;
+use xx_core::opt::hint::*;
+use xx_core::{debug, trace, warn};
 
 use super::*;
 

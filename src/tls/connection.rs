@@ -1,25 +1,18 @@
 #![allow(unsafe_code)]
 
-use std::{
-	io::{self, IoSlice, IoSliceMut},
-	sync::Arc,
-	time::{Duration, Instant}
-};
+use std::io::{self, IoSlice, IoSliceMut};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
-use xx_core::{
-	async_std::io::*,
-	coroutines::{get_context, scoped, Context},
-	debug,
-	enumflags2::BitFlags,
-	macros::wrapper_functions,
-	os::{
-		epoll::PollFlag,
-		socket::{MessageFlag, Shutdown}
-	},
-	trace
-};
+use xx_core::async_std::io::*;
+use xx_core::coroutines::{get_context, scoped, Context};
+use xx_core::enumflags2::BitFlags;
+use xx_core::macros::wrapper_functions;
+use xx_core::os::epoll::PollFlag;
+use xx_core::os::socket::{MessageFlag, Shutdown};
+use xx_core::{debug, trace};
 
 use super::*;
 use crate::net::connection::{self, ConnectOptions, Connection};

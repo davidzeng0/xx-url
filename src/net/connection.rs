@@ -1,22 +1,16 @@
-use std::{
-	io::{IoSlice, IoSliceMut},
-	net::{IpAddr, SocketAddr},
-	sync::Arc,
-	time::{Duration, Instant}
-};
+use std::io::{IoSlice, IoSliceMut};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use xx_core::{
-	async_std::io::*,
-	debug,
-	enumflags2::{make_bitflags, BitFlags},
-	macros::wrapper_functions,
-	os::{
-		epoll::PollFlag,
-		inet::IpProtocol,
-		poll::{self, poll, BorrowedPollFd},
-		socket::{MessageFlag, Shutdown, SocketType}
-	}
-};
+use xx_core::async_std::io::*;
+use xx_core::debug;
+use xx_core::enumflags2::{make_bitflags, BitFlags};
+use xx_core::macros::wrapper_functions;
+use xx_core::os::epoll::PollFlag;
+use xx_core::os::inet::IpProtocol;
+use xx_core::os::poll::{self, poll, BorrowedPollFd};
+use xx_core::os::socket::{MessageFlag, Shutdown, SocketType};
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;

@@ -1,11 +1,11 @@
-use xx_core::{
-	enumflags2::BitFlags,
-	macros::wrapper_functions,
-	os::{epoll::PollFlag, socket::Shutdown}
-};
+use xx_core::enumflags2::BitFlags;
+use xx_core::macros::wrapper_functions;
+use xx_core::os::epoll::PollFlag;
+use xx_core::os::socket::Shutdown;
 
 use super::*;
-use crate::{net::connection::Connection, tls::connection::TlsConn};
+use crate::net::connection::Connection;
+use crate::tls::connection::TlsConn;
 
 #[asynchronous]
 #[allow(unreachable_pub)]

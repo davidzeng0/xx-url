@@ -1,19 +1,17 @@
-use std::{
-	collections::HashMap,
-	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-	time::{Duration, Instant}
-};
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::{Duration, Instant};
 
 use resolv_conf::Config as ResolveConfig;
+use simple_dns::rdata::RData;
 use simple_dns::{
-	rdata::RData, Name, Packet, PacketFlag, Question as Query, ResourceRecord as Record,
-	SimpleDnsError, CLASS as DnsClass, QCLASS as QueryClass, QTYPE as QueryType,
-	RCODE as ResponseCode, TYPE as RecordType
+	Name, Packet, PacketFlag, Question as Query, ResourceRecord as Record, SimpleDnsError,
+	CLASS as DnsClass, QCLASS as QueryClass, QTYPE as QueryType, RCODE as ResponseCode,
+	TYPE as RecordType
 };
-use xx_core::{
-	async_std::{io::*, AsyncIteratorExt},
-	macros::duration
-};
+use xx_core::async_std::io::*;
+use xx_core::async_std::AsyncIteratorExt;
+use xx_core::macros::duration;
 
 use super::*;
 
