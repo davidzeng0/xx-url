@@ -30,27 +30,25 @@ pub use response::*;
 pub use stats::*;
 use stream::*;
 use transfer::*;
+use xx_core::macros::strings;
 
+#[strings]
 #[derive(FromPrimitive, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
 pub enum Version {
+	#[string = "HTTP/0.9"]
 	Http09 = 9,
-	Http10 = 10,
-	Http11 = 11,
-	Http20 = 20,
-	Http30 = 30
-}
 
-impl Version {
-	#[must_use]
-	pub const fn as_str(&self) -> &'static str {
-		match self {
-			Self::Http09 => "HTTP/0.9",
-			Self::Http10 => "HTTP/1.0",
-			Self::Http11 => "HTTP/1.1",
-			Self::Http20 => "HTTP/2.0",
-			Self::Http30 => "HTTP/3.0"
-		}
-	}
+	#[string = "HTTP/1.0"]
+	Http10 = 10,
+
+	#[string = "HTTP/1.1"]
+	Http11 = 11,
+
+	#[string = "HTTP/2.0"]
+	Http20 = 20,
+
+	#[string = "HTTP/3.0"]
+	Http30 = 30
 }
 
 impl fmt::Display for Version {
