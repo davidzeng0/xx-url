@@ -197,7 +197,7 @@ impl<'a> IntoIterator for &'a mut Headers {
 
 enum PayloadRepr {
 	Bytes(Box<[u8]>),
-	Stream(Box<dyn Read>)
+	Stream(Box<dyn Read + Send + Sync>)
 }
 
 pub struct Payload(PayloadRepr);
@@ -214,13 +214,13 @@ impl From<Vec<u8>> for Payload {
 	}
 }
 
-impl From<Box<dyn Read>> for Payload {
-	fn from(value: Box<dyn Read>) -> Self {
+impl From<Box<dyn Read + Send + Sync>> for Payload {
+	fn from(value: Box<dyn Read + Send + Sync>) -> Self {
 		Self(PayloadRepr::Stream(value))
 	}
 }
 
-impl<T: Read + 'static> From<Box<T>> for Payload {
+impl<T: Read + Send + Sync + 'static> From<Box<T>> for Payload {
 	fn from(value: Box<T>) -> Self {
 		Self(PayloadRepr::Stream(value))
 	}

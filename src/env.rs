@@ -37,28 +37,24 @@ async fn create_global_data() -> GlobalData {
 
 	debug!("++ Initializing shared data");
 
-	let config = {
-		let certs = load_system_certs().await.expect("Failed to load certs");
+	let Join(certs, resolver) = join(load_system_certs(), Resolver::new()).await;
 
-		Arc::new(
-			ClientConfig::builder()
-				.with_root_certificates(certs)
-				.with_no_client_auth()
-		)
-	};
+	let certs = certs.expect("Failed to load certs");
+	let resolver = resolver.expect("Failed to initialize DNS resolver");
 
-	let resolver = Arc::new(
-		Resolver::new()
-			.await
-			.expect("Failed to initialize DNS resolver")
-	);
+	let config = ClientConfig::builder()
+		.with_root_certificates(certs)
+		.with_no_client_auth();
 
 	debug!(
 		"== Initialized shared data in {:.3} ms",
 		start.elapsed().as_secs_f32() * 1000.0
 	);
 
-	GlobalData { dns_resolver: resolver, tls_client_config: config }
+	GlobalData {
+		dns_resolver: Arc::new(resolver),
+		tls_client_config: Arc::new(config)
+	}
 }
 
 #[asynchronous]

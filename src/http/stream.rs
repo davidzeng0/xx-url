@@ -49,7 +49,7 @@ impl Inner for TlsConn {
 }
 
 pub struct HttpStream {
-	inner: Box<dyn Inner>
+	inner: Box<dyn Inner + Send + Sync>
 }
 
 #[asynchronous]
@@ -64,7 +64,7 @@ impl HttpStream {
 		pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>>;
 	}
 
-	pub(crate) fn new(inner: impl Inner + 'static) -> Self {
+	pub(crate) fn new(inner: impl Inner + Send + Sync + 'static) -> Self {
 		Self { inner: Box::new(inner) }
 	}
 }

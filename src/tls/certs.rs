@@ -1,10 +1,9 @@
-use std::fs::read_dir;
 use std::path::Path;
 
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use rustls_pemfile::certs;
-use xx_core::debug;
+use xx_core::{debug, trace};
 use xx_pulse::*;
 
 use super::*;
@@ -20,25 +19,27 @@ async fn try_load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'st
 
 #[asynchronous]
 async fn try_load_ca_path(path: &str, store: &mut RootCertStore) -> Result<()> {
-	let entries = match read_dir(path) {
-		Err(err) => return Err(err.into()),
-		Ok(files) => files
-	};
-
+	let entries = io::read_dir(path).await?;
 	let mut certs = Vec::new();
 
 	for entry in entries {
 		let entry = entry?;
-		let meta = entry.metadata()?;
+		let path = entry.path();
 
-		if meta.is_dir() {
+		if entry.metadata()?.is_dir() {
+			trace!("== Skipping directory {:?}", path);
+
 			continue;
 		}
 
-		if let Ok(mut loaded) = try_load_certs(entry.path()).await {
+		if let Ok(mut loaded) = try_load_certs(&path).await {
+			trace!("++ Loaded {} certs from {:?}", loaded.len(), path);
+
 			certs.append(&mut loaded);
 		}
 	}
+
+	debug!("++ Loaded {} certificates from {}", certs.len(), path);
 
 	store.add_parsable_certificates(certs);
 
@@ -51,8 +52,6 @@ pub async fn load_system_certs() -> Result<RootCertStore> {
 	let path = root_certs_path();
 
 	try_load_ca_path(path, &mut root_store).await?;
-
-	debug!(target: &root_store, "== Loaded certificates from {}", path);
 
 	Ok(root_store)
 }
