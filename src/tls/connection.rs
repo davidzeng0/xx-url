@@ -36,7 +36,7 @@ struct Adapter<'a> {
 }
 
 impl<'a> Adapter<'a> {
-	fn new(connection: &'a mut Connection, context: &'a Context) -> Self {
+	unsafe fn new(connection: &'a mut Connection, context: &'a Context) -> Self {
 		Self { connection, context, flags: BitFlags::default() }
 	}
 }
@@ -108,7 +108,6 @@ impl TlsConn {
 		let mut eof = false;
 
 		/* Safety: we are in an async function */
-		#[allow(clippy::multiple_unsafe_ops_per_block)]
 		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
 		loop {
@@ -236,7 +235,6 @@ impl TlsConn {
 		}
 
 		/* Safety: we are in an async function */
-		#[allow(clippy::multiple_unsafe_ops_per_block)]
 		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
 		loop {
@@ -270,7 +268,6 @@ impl TlsConn {
 		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
 	) -> Result<usize> {
 		/* Safety: we are in an async function */
-		#[allow(clippy::multiple_unsafe_ops_per_block)]
 		let mut adapter = unsafe { Adapter::new(&mut self.connection, get_context().await) };
 
 		loop {

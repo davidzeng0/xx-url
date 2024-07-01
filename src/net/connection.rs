@@ -254,7 +254,7 @@ impl Connection {
 		/* error and hangup are ignored by the syscall,
 		 * we only use it to check for intersection
 		 */
-		let flags = make_bitflags!(PollFlag::{RdHangUp | HangUp | Error});
+		let flags = make_bitflags!(PollFlag::{ RdHangUp | HangUp | Error });
 
 		/* sync polling because we don't care about waiting, and async polling isn't
 		 * any faster */

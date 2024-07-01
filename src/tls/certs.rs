@@ -3,7 +3,9 @@ use std::path::Path;
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use rustls_pemfile::certs;
+use xx_core::async_std::AsyncIteratorExt;
 use xx_core::{debug, trace};
+use xx_pulse::fs::read_dir;
 use xx_pulse::*;
 
 use super::*;
@@ -19,14 +21,14 @@ async fn try_load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'st
 
 #[asynchronous]
 async fn try_load_ca_path(path: &str, store: &mut RootCertStore) -> Result<()> {
-	let entries = io::read_dir(path).await?;
+	let mut entries = read_dir(path).await?;
 	let mut certs = Vec::new();
 
-	for entry in entries {
+	while let Some(entry) = entries.next().await {
 		let entry = entry?;
 		let path = entry.path();
 
-		if entry.metadata()?.is_dir() {
+		if entry.file_type().is_dir() {
 			trace!("== Skipping directory {:?}", path);
 
 			continue;
