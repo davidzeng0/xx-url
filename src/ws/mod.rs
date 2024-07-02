@@ -218,7 +218,7 @@ impl fmt::Display for Frame {
 }
 
 pub fn mask(data: &mut [u8], mut mask: u32) {
-	/* Safety: transmute u8x4 to u32x1 is ok */
+	/* Safety: transmute [u8; 4] to u32 is ok */
 	#[allow(unsafe_code)]
 	let (pre, align, post) = unsafe { data.align_to_mut::<u32>() };
 
