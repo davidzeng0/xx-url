@@ -16,7 +16,7 @@ impl Answer {
 	}
 }
 
-#[asynchronous]
+#[asynchronous(impl(ref, mut, box))]
 pub trait Lookup {
 	async fn lookup(&self, queries: &Query<'_>) -> Result<Answer>;
 }

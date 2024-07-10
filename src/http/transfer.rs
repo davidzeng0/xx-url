@@ -5,8 +5,8 @@ use std::str::{from_utf8, FromStr};
 use url::Position;
 
 use super::*;
-use crate::net::connection::*;
-use crate::tls::connection::TlsConn;
+use crate::net::conn::*;
+use crate::tls::conn::TlsConn;
 
 /* maximum allowed Content-Length header if we want to reuse a connection for
  * redirect instead of closing it and opening a new one */
@@ -115,7 +115,7 @@ impl Request {
 #[asynchronous]
 async fn get_connection_for(
 	request: &Request, url: &Url, _connection_pool: /* TOOD */ Option<()>
-) -> Result<(HttpStream, Option<Stats>)> {
+) -> Result<(HttpConn, Option<Stats>)> {
 	let mut options = ConnectOptions::new(
 		url.host_str().unwrap(),
 		url.port().unwrap_or(request.options.port)
@@ -146,11 +146,11 @@ async fn get_connection_for(
 	let (stream, stats) = if request.options.secure {
 		let (conn, stats) = TlsConn::connect_stats(&options).await?;
 
-		(HttpStream::new(conn), stats.into())
+		(HttpConn::new(conn), stats.into())
 	} else {
-		let (conn, stats) = Connection::connect_stats(&options).await?;
+		let (conn, stats) = Conn::connect_stats(&options).await?;
 
-		(HttpStream::new(conn), stats.into())
+		(HttpConn::new(conn), stats.into())
 	};
 
 	Ok((stream, Some(stats)))
@@ -243,7 +243,8 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		};
 	}
 
-	let mut line = from_utf8(&reader.buffer()[0..offset]).map_err(|_| ErrorKind::invalid_utf8())?;
+	let mut line =
+		from_utf8(&(*reader).buffer()[0..offset]).map_err(|_| ErrorKind::invalid_utf8())?;
 
 	if let Some(ln) = line.strip_suffix('\n') {
 		line = ln;
@@ -401,7 +402,7 @@ pub struct RawResponse {
 #[asynchronous]
 pub async fn transfer(
 	request: &mut Request, connection_pool: Option<()>
-) -> Result<(RawResponse, BufReader<HttpStream>)> {
+) -> Result<(RawResponse, BufReader<HttpConn>)> {
 	let version = Version::Http11;
 	let req_url = request.request.finalize()?;
 

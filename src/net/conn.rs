@@ -113,12 +113,12 @@ impl<'host> ConnectOptions<'host> {
 	}
 }
 
-pub struct Connection {
+pub struct Conn {
 	inner: Socket
 }
 
 #[asynchronous]
-impl Connection {
+impl Conn {
 	wrapper_functions! {
 		inner = self.inner;
 
@@ -270,16 +270,25 @@ impl Connection {
 	}
 }
 
-impl Read for Connection {
+impl Read for Conn {
 	read_wrapper! {
 		inner = inner;
 		mut inner = inner;
 	}
 }
 
-impl Write for Connection {
+impl Write for Conn {
 	write_wrapper! {
 		inner = inner;
 		mut inner = inner;
+	}
+}
+
+impl SplitMut for Conn {
+	type Reader<'a> = SocketHalf<'a>;
+	type Writer<'a> = SocketHalf<'a>;
+
+	fn try_split(&mut self) -> Result<(Self::Reader<'_>, Self::Writer<'_>)> {
+		self.inner.try_split()
 	}
 }

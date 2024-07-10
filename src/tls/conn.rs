@@ -1,42 +1,44 @@
 #![allow(unsafe_code)]
 
-use std::io::{self, IoSlice, IoSliceMut};
+use std::io::{self, IoSlice};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rustls::{ClientConfig, ClientConnection};
 use x509_parser::prelude::*;
 use xx_core::async_std::io::*;
+use xx_core::async_std::sync::Mutex;
 use xx_core::coroutines::{get_context, scoped, Context};
 use xx_core::enumflags2::BitFlags;
+use xx_core::impls::Buffer;
 use xx_core::macros::wrapper_functions;
 use xx_core::os::epoll::PollFlag;
 use xx_core::os::socket::{MessageFlag, Shutdown};
 use xx_core::{debug, trace};
 
 use super::*;
-use crate::net::connection::{self, ConnectOptions, Connection};
+use crate::net::conn::{self, Conn, ConnectOptions};
 
 #[derive(Default, Clone, Copy)]
 pub struct ConnectStats {
-	pub stats: connection::ConnectStats,
+	pub stats: conn::ConnectStats,
 	pub tls_connect: Duration
 }
 
-impl From<connection::ConnectStats> for ConnectStats {
-	fn from(stats: connection::ConnectStats) -> Self {
+impl From<conn::ConnectStats> for ConnectStats {
+	fn from(stats: conn::ConnectStats) -> Self {
 		Self { stats, ..Default::default() }
 	}
 }
 
 struct Adapter<'a> {
-	connection: &'a mut Connection,
+	connection: &'a mut Conn,
 	context: &'a Context,
 	flags: BitFlags<MessageFlag>
 }
 
 impl<'a> Adapter<'a> {
-	unsafe fn new(connection: &'a mut Connection, context: &'a Context) -> Self {
+	unsafe fn new(connection: &'a mut Conn, context: &'a Context) -> Self {
 		Self { connection, context, flags: BitFlags::default() }
 	}
 }
@@ -45,17 +47,6 @@ impl io::Read for Adapter<'_> {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		/* Safety: guaranteed by caller */
 		unsafe { scoped(self.context, self.connection.recv(buf, self.flags)) }.map_err(Into::into)
-	}
-
-	fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
-		/* Safety: guaranteed by caller */
-		unsafe {
-			scoped(
-				self.context,
-				self.connection.recv_vectored(bufs, self.flags)
-			)
-		}
-		.map_err(Into::into)
 	}
 }
 
@@ -82,7 +73,7 @@ impl io::Write for Adapter<'_> {
 }
 
 pub struct TlsConn {
-	connection: Connection,
+	connection: Conn,
 	tls: ClientConnection
 }
 
@@ -200,7 +191,7 @@ impl TlsConn {
 		let server_name = options.host().to_string().try_into().map_err(Error::new)?;
 		let tls = ClientConnection::new(config, server_name).map_err(Error::new)?;
 
-		let (connection, stats) = Connection::connect_stats(options).await?;
+		let (connection, stats) = Conn::connect_stats(options).await?;
 
 		let mut connection = Self { connection, tls };
 		let mut stats = stats.into();
@@ -259,11 +250,6 @@ impl TlsConn {
 			.await
 	}
 
-	pub async fn recv_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
-		self.tls_read(|tls| io::Read::read_vectored(&mut tls.reader(), bufs))
-			.await
-	}
-
 	async fn tls_write(
 		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
 	) -> Result<usize> {
@@ -278,9 +264,7 @@ impl TlsConn {
 					return Ok(wrote);
 				}
 
-				if let Err(err) = check_interrupt().await {
-					return if wrote == 0 { Err(err) } else { Ok(wrote) };
-				}
+				check_interrupt_if_zero(wrote).await?;
 			}
 
 			if wrote != 0 {
@@ -305,14 +289,6 @@ impl Read for TlsConn {
 	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
 		self.recv(buf).await
 	}
-
-	fn is_read_vectored(&self) -> bool {
-		true
-	}
-
-	async fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> Result<usize> {
-		self.recv_vectored(bufs).await
-	}
 }
 
 #[asynchronous]
@@ -327,5 +303,184 @@ impl Write for TlsConn {
 
 	async fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
 		self.send_vectored(bufs).await
+	}
+}
+
+pub struct TlsReadHalf<'a> {
+	connection: BufReader<SocketHalf<'a>>,
+	tls: Arc<Mutex<&'a mut ClientConnection>>
+}
+
+#[asynchronous]
+impl<'a> TlsReadHalf<'a> {
+	fn new(connection: SocketHalf<'a>, tls: Arc<Mutex<&'a mut ClientConnection>>) -> Self {
+		Self { connection: BufReader::new(connection), tls }
+	}
+
+	async fn tls_read(
+		&mut self, mut read: impl FnMut(&mut ClientConnection) -> io::Result<usize>
+	) -> Result<usize> {
+		struct Adapter<'a, 'b> {
+			connection: &'b mut BufReader<SocketHalf<'a>>
+		}
+
+		impl io::Read for Adapter<'_, '_> {
+			fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+				if !self.connection.buffer().is_empty() {
+					let read = read_into_slice(buf, self.connection.buffer());
+
+					self.connection.consume(read);
+
+					Ok(read)
+				} else {
+					Err(io::ErrorKind::WouldBlock.into())
+				}
+			}
+		}
+
+		let mut tls = self.tls.lock().await.unwrap();
+
+		loop {
+			match read(&mut tls) {
+				Ok(0) => (),
+				Ok(n) => return Ok(n),
+				Err(err) if err.kind() == io::ErrorKind::WouldBlock => (),
+				Err(err) => return Err(err.into())
+			}
+
+			if !self.connection.buffer().is_empty() {
+				let mut adapter = Adapter { connection: &mut self.connection };
+
+				tls.read_tls(&mut adapter)?;
+
+				let state = tls.process_new_packets().map_err(Error::new)?;
+
+				if state.plaintext_bytes_to_read() != 0 {
+					continue;
+				}
+			}
+
+			drop(tls);
+
+			self.connection.fill().await?;
+
+			tls = self.tls.lock().await.unwrap();
+		}
+	}
+
+	pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
+		self.connection.inner_mut().poll(flags).await
+	}
+
+	pub async fn shutdown(&mut self, how: Shutdown) -> Result<()> {
+		self.connection.inner_mut().shutdown(how).await
+	}
+}
+
+#[asynchronous]
+impl Read for TlsReadHalf<'_> {
+	async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+		self.tls_read(|tls| io::Read::read(&mut tls.reader(), buf))
+			.await
+	}
+}
+
+pub struct TlsWriteHalf<'a> {
+	connection: SocketHalf<'a>,
+	tls: Arc<Mutex<&'a mut ClientConnection>>
+}
+
+#[asynchronous]
+impl<'a> TlsWriteHalf<'a> {
+	fn new(connection: SocketHalf<'a>, tls: Arc<Mutex<&'a mut ClientConnection>>) -> Self {
+		Self { connection, tls }
+	}
+
+	async fn tls_write(
+		&mut self, write: impl Fn(&mut ClientConnection) -> io::Result<usize>
+	) -> Result<usize> {
+		loop {
+			let mut tls = self.tls.lock().await.unwrap();
+			let mut buf = Buffer::<DEFAULT_BUFFER_SIZE>::new();
+
+			let wrote = write(&mut tls)?;
+
+			if !tls.wants_write() {
+				break Ok(wrote);
+			}
+
+			tls.write_tls(&mut buf)?;
+
+			drop(tls);
+
+			if self.connection.send(&buf, BitFlags::default()).await? == 0 {
+				break Ok(wrote);
+			}
+
+			if wrote != 0 {
+				break Ok(wrote);
+			}
+		}
+	}
+
+	pub async fn poll(&mut self, flags: BitFlags<PollFlag>) -> Result<BitFlags<PollFlag>> {
+		self.connection.poll(flags).await
+	}
+
+	pub async fn shutdown(&mut self, how: Shutdown) -> Result<()> {
+		self.connection.shutdown(how).await
+	}
+}
+
+#[asynchronous]
+impl Write for TlsWriteHalf<'_> {
+	async fn write(&mut self, buf: &[u8]) -> Result<usize> {
+		self.tls_write(|tls| io::Write::write(&mut tls.writer(), buf))
+			.await
+	}
+
+	async fn flush(&mut self) -> Result<()> {
+		loop {
+			let mut tls = self.tls.lock().await.unwrap();
+			let mut buf = Buffer::<DEFAULT_BUFFER_SIZE>::new();
+
+			if !tls.wants_write() {
+				break;
+			}
+
+			tls.write_tls(&mut buf)?;
+
+			drop(tls);
+
+			if self.connection.send(&buf, BitFlags::default()).await? == 0 {
+				return Err(short_io_error_unless_interrupt().await);
+			}
+		}
+
+		Ok(())
+	}
+
+	fn is_write_vectored(&self) -> bool {
+		true
+	}
+
+	async fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> Result<usize> {
+		self.tls_write(|tls| io::Write::write_vectored(&mut tls.writer(), bufs))
+			.await
+	}
+}
+
+impl SplitMut for TlsConn {
+	type Reader<'a> = TlsReadHalf<'a>;
+	type Writer<'a> = TlsWriteHalf<'a>;
+
+	fn try_split(&mut self) -> Result<(Self::Reader<'_>, Self::Writer<'_>)> {
+		let conn = self.connection.try_split()?;
+		let tls = Arc::new(Mutex::new(&mut self.tls));
+
+		Ok((
+			TlsReadHalf::new(conn.0, tls.clone()),
+			TlsWriteHalf::new(conn.1, tls)
+		))
 	}
 }

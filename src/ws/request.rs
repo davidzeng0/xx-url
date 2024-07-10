@@ -1,5 +1,5 @@
 use super::*;
-use crate::net::connection::IpStrategy;
+use crate::net::conn::IpStrategy;
 
 const DEFAULT_MAX_MESSAGE_LENGTH: usize = 128 * 1024 * 1024;
 

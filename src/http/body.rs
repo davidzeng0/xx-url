@@ -30,7 +30,7 @@ enum Transfer {
 }
 
 pub struct Body {
-	reader: BufReader<HttpStream>,
+	reader: BufReader<HttpConn>,
 	transfer: Transfer,
 	reusable: bool
 }
@@ -38,7 +38,7 @@ pub struct Body {
 #[asynchronous]
 impl Body {
 	pub(super) fn new(
-		reader: BufReader<HttpStream>, request: &Request, response: &RawResponse
+		reader: BufReader<HttpConn>, request: &Request, response: &RawResponse
 	) -> Result<Self> {
 		let mut body = Self {
 			reader,

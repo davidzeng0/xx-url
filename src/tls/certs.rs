@@ -5,14 +5,13 @@ use rustls::RootCertStore;
 use rustls_pemfile::certs;
 use xx_core::async_std::AsyncIteratorExt;
 use xx_core::{debug, trace};
-use xx_pulse::fs::read_dir;
 use xx_pulse::*;
 
 use super::*;
 
 #[asynchronous]
 async fn try_load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'static>>> {
-	let data = File::load(path).await?;
+	let data = fs::read(path).await?;
 
 	certs(&mut &data[..])
 		.map(|result| result.map_err(Into::into))
@@ -21,7 +20,7 @@ async fn try_load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'st
 
 #[asynchronous]
 async fn try_load_ca_path(path: &str, store: &mut RootCertStore) -> Result<()> {
-	let mut entries = read_dir(path).await?;
+	let mut entries = fs::read_dir(path).await?;
 	let mut certs = Vec::new();
 
 	while let Some(entry) = entries.next().await {

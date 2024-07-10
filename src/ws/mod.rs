@@ -13,24 +13,25 @@ use xx_core::macros::*;
 use xx_pulse::impls::TaskExtensionsExt;
 
 use super::*;
-use crate::http::stream::HttpStream;
+use crate::http::stream::*;
 use crate::http::transfer::Request;
 use crate::http::{Headers, HttpError, Payload, TryIntoHeaderName, TryIntoHeaderValue, Version};
 
+mod conn;
 mod consts;
 mod errors;
 mod handshake;
 mod request;
+mod stream;
 mod transfer;
-mod web_socket;
 mod wire;
 
+pub use conn::*;
 use consts::*;
 pub use errors::*;
 use handshake::*;
 pub use request::{open, *};
 use transfer::*;
-pub use web_socket::*;
 use wire::Op;
 
 #[repr(u16)]

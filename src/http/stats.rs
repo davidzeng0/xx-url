@@ -1,7 +1,7 @@
 use std::fmt;
 
 use super::*;
-use crate::net::connection::ConnectStats;
+use crate::net::conn::ConnectStats;
 use crate::tls;
 
 #[derive(Default, Clone, Copy)]
@@ -41,8 +41,8 @@ impl fmt::Debug for Stats {
 	}
 }
 
-impl From<tls::connection::ConnectStats> for Stats {
-	fn from(connect: tls::connection::ConnectStats) -> Self {
+impl From<tls::conn::ConnectStats> for Stats {
+	fn from(connect: tls::conn::ConnectStats) -> Self {
 		Self {
 			connect: Some(connect.stats),
 			tls_connect: Some(connect.tls_connect),

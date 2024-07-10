@@ -2,7 +2,7 @@ use xx_core::coroutines::Task;
 use xx_core::macros::wrapper_functions;
 
 use super::*;
-use crate::net::connection::IpStrategy;
+use crate::net::conn::IpStrategy;
 
 pub struct HttpRequest {
 	pub(super) inner: Request

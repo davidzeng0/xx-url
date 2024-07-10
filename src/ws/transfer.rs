@@ -15,7 +15,7 @@ macro_rules! check_header {
 }
 
 #[asynchronous]
-pub async fn connect(request: &mut WsRequest) -> Result<BufReader<HttpStream>> {
+pub async fn connect(request: &mut WsRequest) -> Result<BufReader<HttpConn>> {
 	let mut key_bytes = [0u8; 24];
 	let mut accept_bytes = [0u8; 28];
 
@@ -117,7 +117,7 @@ async fn handle_request<T>(reader: &mut impl BufRead, log: &T) -> Result<Headers
 }
 
 #[asynchronous]
-pub async fn handle_upgrade<T>(stream: HttpStream, log: &T) -> Result<BufReader<HttpStream>> {
+pub async fn handle_upgrade<T>(stream: HttpConn, log: &T) -> Result<BufReader<HttpConn>> {
 	let mut reader = BufReader::new(stream);
 	let headers = handle_request(&mut reader, log).await?;
 	let (stream, buf, pos) = reader.into_parts();

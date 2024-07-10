@@ -11,7 +11,7 @@ pub struct Config {
 #[asynchronous]
 impl Config {
 	pub async fn new() -> Result<Self> {
-		let data = File::load(resolver_conf_path()).await?;
+		let data = fs::read(resolver_conf_path()).await?;
 		let config = ResolveConfig::parse(data).map_err(Error::new)?;
 
 		let mut name_servers = Vec::new();

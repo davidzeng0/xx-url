@@ -24,7 +24,7 @@ impl Op {
 
 #[packet]
 #[allow(dead_code)]
-pub struct FrameHeader {
+pub struct Frame {
 	pub fin: u1,
 	pub resv: u3,
 	pub op: u4,
