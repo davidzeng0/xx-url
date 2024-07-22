@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use ::http::header::*;
+use ::http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use ::http::Method;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -28,9 +28,10 @@ pub use error::*;
 pub use request::*;
 pub use response::*;
 pub use stats::*;
-use stream::*;
-use transfer::*;
 use xx_core::macros::strings;
+
+use self::stream::*;
+use self::transfer::*;
 
 #[strings]
 #[derive(FromPrimitive, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
@@ -111,12 +112,12 @@ impl Headers {
 
 		pub fn capacity(&self) -> usize;
 		pub fn reserve(&mut self, additional: usize);
-		pub fn iter(&self) -> Iter<'_, HeaderValue>;
-		pub fn iter_mut(&mut self) -> IterMut<'_, HeaderValue>;
-		pub fn keys(&self) -> Keys<'_, HeaderValue>;
-		pub fn values(&self) -> Values<'_, HeaderValue>;
-		pub fn values_mut(&mut self) -> ValuesMut<'_, HeaderValue>;
-		pub fn drain(&mut self) -> Drain<'_, HeaderValue>;
+		pub fn iter(&self) -> header::Iter<'_, HeaderValue>;
+		pub fn iter_mut(&mut self) -> header::IterMut<'_, HeaderValue>;
+		pub fn keys(&self) -> header::Keys<'_, HeaderValue>;
+		pub fn values(&self) -> header::Values<'_, HeaderValue>;
+		pub fn values_mut(&mut self) -> header::ValuesMut<'_, HeaderValue>;
+		pub fn drain(&mut self) -> header::Drain<'_, HeaderValue>;
 		pub fn clear(&mut self);
 	}
 
@@ -154,7 +155,7 @@ impl Headers {
 
 	/// # Panics
 	/// if `key` cannot be converted into a `HeaderName`
-	pub fn entry(&mut self, key: impl TryIntoHeaderName) -> Entry<'_, HeaderValue> {
+	pub fn entry(&mut self, key: impl TryIntoHeaderName) -> header::Entry<'_, HeaderValue> {
 		let key = key.try_into_name().unwrap();
 
 		self.0.entry(key)
@@ -178,7 +179,7 @@ impl Headers {
 }
 
 impl<'a> IntoIterator for &'a Headers {
-	type IntoIter = Iter<'a, HeaderValue>;
+	type IntoIter = header::Iter<'a, HeaderValue>;
 	type Item = (&'a HeaderName, &'a HeaderValue);
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -187,7 +188,7 @@ impl<'a> IntoIterator for &'a Headers {
 }
 
 impl<'a> IntoIterator for &'a mut Headers {
-	type IntoIter = IterMut<'a, HeaderValue>;
+	type IntoIter = header::IterMut<'a, HeaderValue>;
 	type Item = (&'a HeaderName, &'a mut HeaderValue);
 
 	fn into_iter(self) -> Self::IntoIter {

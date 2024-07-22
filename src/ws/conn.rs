@@ -139,9 +139,9 @@ impl WebSocketHandle {
 
 #[asynchronous(task)]
 impl Task for WebSocketHandle {
-	type Output<'a> = Result<WebSocket>;
+	type Output = Result<WebSocket>;
 
-	async fn run(self) -> Result<WebSocket> {
+	async fn run(self) -> Self::Output {
 		self.accept_websocket().await
 	}
 }

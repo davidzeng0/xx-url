@@ -24,10 +24,12 @@ impl Key {
 		Ok(Self { data })
 	}
 
+	#[allow(clippy::missing_panics_doc)]
 	pub fn encode(&self, out: &mut [u8; 24]) {
 		STANDARD.encode_slice(self.data, out).unwrap();
 	}
 
+	#[allow(clippy::missing_panics_doc)]
 	pub fn accept(&self, out: &mut [u8; 28]) {
 		let mut key = [0u8; 24];
 		let mut sum = [0u8; 20];

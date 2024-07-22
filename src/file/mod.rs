@@ -1,7 +1,7 @@
 use super::*;
 
 mod stream;
-use stream::*;
+use self::stream::*;
 
 pub mod request;
 pub use request::*;

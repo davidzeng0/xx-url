@@ -10,7 +10,7 @@ use xx_core::async_std::io::*;
 use xx_core::async_std::sync::Mutex;
 use xx_core::coroutines::{get_context, scoped, Context};
 use xx_core::enumflags2::BitFlags;
-use xx_core::impls::Buffer;
+use xx_core::io::*;
 use xx_core::macros::wrapper_functions;
 use xx_core::os::epoll::PollFlag;
 use xx_core::os::socket::{MessageFlag, Shutdown};
@@ -38,6 +38,8 @@ struct Adapter<'a> {
 }
 
 impl<'a> Adapter<'a> {
+	/// # Safety
+	/// Calls to io functions must be allowed to suspend
 	unsafe fn new(connection: &'a mut Conn, context: &'a Context) -> Self {
 		Self { connection, context, flags: BitFlags::default() }
 	}
@@ -401,7 +403,7 @@ impl<'a> TlsWriteHalf<'a> {
 	) -> Result<usize> {
 		loop {
 			let mut tls = self.tls.lock().await.unwrap();
-			let mut buf = Buffer::<DEFAULT_BUFFER_SIZE>::new();
+			let mut buf = UninitBuf::<DEFAULT_BUFFER_SIZE>::new();
 
 			let wrote = write(&mut tls)?;
 
@@ -442,7 +444,7 @@ impl Write for TlsWriteHalf<'_> {
 	async fn flush(&mut self) -> Result<()> {
 		loop {
 			let mut tls = self.tls.lock().await.unwrap();
-			let mut buf = Buffer::<DEFAULT_BUFFER_SIZE>::new();
+			let mut buf = UninitBuf::<DEFAULT_BUFFER_SIZE>::new();
 
 			if !tls.wants_write() {
 				break;

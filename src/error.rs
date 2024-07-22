@@ -2,10 +2,10 @@ use xx_core::error::*;
 
 #[errors]
 pub enum UrlError {
-	#[error("Request with an error has been consumed")]
+	#[display("Request with an error has been consumed")]
 	InvalidRequest,
 
-	#[error("{}", f0)]
+	#[display("{}", f0)]
 	#[kind = ErrorKind::InvalidInput]
 	InvalidUrl(
 		#[from]
@@ -13,23 +13,23 @@ pub enum UrlError {
 		url::ParseError
 	),
 
-	#[error("Scheme \"{}\" is invalid for this request", f0)]
+	#[display("Scheme \"{}\" is invalid for this request", f0)]
 	#[kind = ErrorKind::InvalidData]
 	InvalidScheme(String),
 
-	#[error("Partial file")]
+	#[display("Partial file")]
 	#[kind = ErrorKind::UnexpectedEof]
 	PartialFile,
 
-	#[error("Invalid redirect URL \"{}\"", f0)]
+	#[display("Invalid redirect URL \"{}\"", f0)]
 	#[kind = ErrorKind::InvalidData]
 	InvalidRedirectUrl(String),
 
-	#[error("Redirect forbidden due to change in url scheme to {}", f0)]
+	#[display("Redirect forbidden due to change in url scheme to {}", f0)]
 	#[kind = ErrorKind::InvalidData]
 	RedirectForbidden(String),
 
-	#[error("DNS query timed out")]
+	#[display("DNS query timed out")]
 	#[kind = ErrorKind::TimedOut]
 	DnsTimedOut
 }

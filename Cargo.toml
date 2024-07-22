@@ -10,7 +10,11 @@ num-derive = "0.4.2"
 num-traits = "0.2.19"
 rand = "0.8.5"
 resolv-conf = "0.7.0"
-rustls = { version = "0.23.10", default-features = false, features = ["std", "tls12", "ring"] }
+rustls = { version = "0.23.10", default-features = false, features = [
+	"std",
+	"tls12",
+	"ring",
+] }
 rustls-pemfile = "2.1.2"
 url = "2.5.2"
 x509-parser = "0.16.0"
@@ -119,3 +123,5 @@ flat_map_option = "warn"
 option_as_ref_cloned = "warn"
 option_option = "warn"
 todo = "warn"
+unused_async = "warn"
+wildcard_imports = "warn"

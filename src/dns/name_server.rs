@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use xx_core::debug;
-use xx_pulse::impls::TaskExtensionsExt;
+use xx_pulse::impls::TaskExt;
 
 use super::*;
 

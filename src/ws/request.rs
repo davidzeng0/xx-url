@@ -99,9 +99,9 @@ impl WsRequest {
 
 #[asynchronous(task)]
 impl Task for WsRequest {
-	type Output<'ctx> = Result<WebSocket>;
+	type Output = Result<WebSocket>;
 
-	async fn run(mut self) -> Result<WebSocket> {
+	async fn run(mut self) -> Self::Output {
 		WebSocket::new(&mut self).await
 	}
 }

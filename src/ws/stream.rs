@@ -3,8 +3,9 @@ use std::io::{Cursor, IoSlice, Write as _};
 
 use num_traits::FromPrimitive;
 use xx_core::async_std::AsyncIterator;
+use xx_core::coroutines::ops::AsyncFnOnce;
 use xx_core::debug;
-use xx_core::impls::AsyncFnOnce;
+use xx_core::io::*;
 use xx_core::os::epoll::PollFlag;
 use xx_core::os::socket::Shutdown;
 use xx_core::pointer::*;
@@ -70,6 +71,7 @@ impl FrameHeader {
 		}))
 	}
 
+	#[allow(clippy::missing_panics_doc)]
 	fn write(&self, writer: &mut Cursor<&mut [u8]>) -> Result<()> {
 		let mut length = [0u8; size_of::<u64>()];
 		let (len, length) = encode_len(self.len, &mut length);
@@ -152,7 +154,7 @@ impl Shared {
 async fn do_close<S, F>(stream: &mut S, write_data: F) -> Result<()>
 where
 	S: ConnExtra,
-	F: for<'a> AsyncFnOnce<&'a mut S, Output = Result<()>>
+	F: AsyncFnOnce(&mut S) -> Result<()>
 {
 	write_data.call_once(stream).await?;
 	stream.shutdown(Shutdown::Write).await?;
@@ -167,7 +169,7 @@ async fn close<T, S, F>(
 ) -> Result<()>
 where
 	S: ConnExtra,
-	F: for<'a> AsyncFnOnce<&'a mut S, Output = Result<()>>
+	F: AsyncFnOnce(&mut S) -> Result<()>
 {
 	let result = do_close(stream, write_data)
 		.timeout(shared.close_timeout)
@@ -340,7 +342,7 @@ impl<'a, R: BufRead + ConnExtra> Frames<'a, R> {
 							ptr!(&*self),
 							self.reader.data,
 							&mut self.reader.stream,
-							|_: &mut R| async move { Ok(()) }
+							|_: &mut R| async { Ok(()) }
 						)
 						.await?;
 					}

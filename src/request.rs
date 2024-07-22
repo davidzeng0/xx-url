@@ -36,6 +36,7 @@ impl RequestBase {
 		self.url.as_ref().ok()
 	}
 
+	#[allow(clippy::missing_panics_doc)]
 	pub fn finalize(&mut self) -> Result<&Url> {
 		if self.url.is_ok() {
 			Ok(self.url.as_ref().unwrap())

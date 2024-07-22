@@ -45,9 +45,9 @@ impl HttpRequest {
 
 #[asynchronous(task)]
 impl Task for HttpRequest {
-	type Output<'ctx> = Result<Response>;
+	type Output = Result<Response>;
 
-	async fn run(mut self) -> Result<Response> {
+	async fn run(mut self) -> Self::Output {
 		Response::fetch(&mut self).await
 	}
 }

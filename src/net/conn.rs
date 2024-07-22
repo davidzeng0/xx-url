@@ -11,7 +11,7 @@ use xx_core::os::epoll::PollFlag;
 use xx_core::os::inet::IpProtocol;
 use xx_core::os::poll::{self, poll, BorrowedPollFd};
 use xx_core::os::socket::{MessageFlag, Shutdown, SocketType};
-use xx_pulse::impls::TaskExtensionsExt;
+use xx_pulse::impls::TaskExt;
 
 use super::*;
 use crate::dns::{LookupIp, Resolver};

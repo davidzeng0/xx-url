@@ -54,7 +54,7 @@ impl Body {
 
 		if bodyless {
 			body.transfer = Transfer::Empty;
-		} else if let Some(encoding) = response.headers.get_str(TRANSFER_ENCODING)? {
+		} else if let Some(encoding) = response.headers.get_str(header::TRANSFER_ENCODING)? {
 			#[allow(clippy::redundant_closure_for_method_calls)]
 			for encoding in encoding.split(',').map(|e| e.trim()) {
 				if encoding.eq_ignore_ascii_case("chunked") {
@@ -63,15 +63,15 @@ impl Body {
 					break;
 				}
 			}
-		} else if let Some(length) = response.headers.get_str(CONTENT_LENGTH)? {
-			let len = length
-				.parse()
-				.map_err(|_| HttpError::InvalidHeader(CONTENT_LENGTH, length.to_string()))?;
+		} else if let Some(length) = response.headers.get_str(header::CONTENT_LENGTH)? {
+			let len = length.parse().map_err(|_| {
+				HttpError::InvalidHeader(header::CONTENT_LENGTH, length.to_string())
+			})?;
 
 			body.transfer = Transfer::Length(len);
 		}
 
-		if let Some(conn) = response.headers.get_str(CONNECTION)? {
+		if let Some(conn) = response.headers.get_str(header::CONNECTION)? {
 			if conn.eq_ignore_ascii_case("keep-alive") {
 				body.reusable = true;
 			}

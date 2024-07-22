@@ -406,8 +406,10 @@ pub async fn transfer(
 	let version = Version::Http11;
 	let req_url = request.request.finalize()?;
 
-	if version <= Version::Http11 && !request.headers.contains_key(HOST) {
-		request.headers.insert(HOST, req_url.host_str().unwrap())?;
+	if version <= Version::Http11 && !request.headers.contains_key(header::HOST) {
+		request
+			.headers
+			.insert(header::HOST, req_url.host_str().unwrap())?;
 	}
 
 	let req_url = request.request.url().unwrap();
@@ -463,7 +465,7 @@ pub async fn transfer(
 		};
 
 		if redirects_remaining > 0 && response.status.is_redirection() {
-			if let Some(location) = response.headers.get_str(LOCATION)? {
+			if let Some(location) = response.headers.get_str(header::LOCATION)? {
 				#[allow(clippy::arithmetic_side_effects)]
 				(redirects_remaining -= 1);
 

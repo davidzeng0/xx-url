@@ -10,7 +10,7 @@ use xx_core::async_std::io::typed::{BufReadTyped, WriteTyped};
 use xx_core::async_std::io::*;
 use xx_core::coroutines::*;
 use xx_core::macros::*;
-use xx_pulse::impls::TaskExtensionsExt;
+use xx_pulse::impls::TaskExt;
 
 use super::*;
 use crate::http::stream::*;
@@ -27,12 +27,13 @@ mod transfer;
 mod wire;
 
 pub use conn::*;
-use consts::*;
 pub use errors::*;
-use handshake::*;
 pub use request::{open, *};
-use transfer::*;
 use wire::Op;
+
+use self::consts::*;
+use self::handshake::*;
+use self::transfer::*;
 
 #[repr(u16)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]

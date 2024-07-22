@@ -9,9 +9,10 @@ pub mod ws;
 
 mod request;
 
-use env::*;
-use error::*;
-use request::*;
 use url::Url;
 use xx_core::error::*;
 use xx_pulse::*;
+
+use self::env::*;
+use self::error::*;
+use self::request::*;
