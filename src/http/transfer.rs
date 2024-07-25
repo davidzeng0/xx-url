@@ -243,8 +243,7 @@ pub async fn read_line_in_place(reader: &mut impl BufRead) -> Result<(&str, usiz
 		};
 	}
 
-	let mut line =
-		from_utf8(&(*reader).buffer()[0..offset]).map_err(|_| ErrorKind::invalid_utf8())?;
+	let mut line = from_utf8(&(*reader).buffer()[0..offset])?;
 
 	if let Some(ln) = line.strip_suffix('\n') {
 		line = ln;

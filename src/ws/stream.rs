@@ -385,9 +385,7 @@ impl<'a, R: BufRead + ConnExtra> Frames<'a, R> {
 
 				Some(match op {
 					Op::Binary => Frame::Binary(buf),
-					Op::Text => {
-						Frame::Text(String::from_utf8(buf).map_err(|_| ErrorKind::invalid_utf8())?)
-					}
+					Op::Text => Frame::Text(String::from_utf8(buf)?),
 					_ => unreachable!()
 				})
 			} else {

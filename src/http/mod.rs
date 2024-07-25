@@ -148,7 +148,7 @@ impl Headers {
 		};
 
 		Ok(match self.0.get(key) {
-			Some(value) => Some(value.to_str().map_err(|_| ErrorKind::invalid_utf8())?),
+			Some(value) => Some(value.to_str().map_err(|_| common::INVALID_UTF8)?),
 			None => None
 		})
 	}

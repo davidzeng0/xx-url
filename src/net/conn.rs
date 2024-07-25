@@ -187,7 +187,7 @@ impl Conn {
 			}
 		}
 
-		Err(error.unwrap_or_else(|| ErrorKind::no_addrs().into()))
+		Err(error.unwrap_or_else(|| common::NO_ADDRESSES.into()))
 	}
 
 	async fn connect_to(
@@ -222,7 +222,7 @@ impl Conn {
 			Some(duration) => Self::connect_to(options, &addrs, &mut stats)
 				.timeout(duration)
 				.await
-				.ok_or(ErrorKind::connect_timed_out())??
+				.ok_or(common::CONNECT_TIMEOUT)??
 		};
 
 		if let Some(size) = options.recvbuf_size {
