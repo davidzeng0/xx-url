@@ -53,26 +53,19 @@ impl WsRequest {
 		inner = self.inner;
 		mut inner = self.inner;
 
-		#[chain]
 		#[allow(clippy::impl_trait_in_params)]
 		pub fn header(&mut self, key: impl TryIntoHeaderName, value: impl TryIntoHeaderValue) -> &mut Self;
 
-		#[chain]
 		pub fn set_port(&mut self, port: u16) -> &mut Self;
 
-		#[chain]
 		pub fn set_strategy(&mut self, strategy: IpStrategy) -> &mut Self;
 
-		#[chain]
 		pub fn set_timeout(&mut self, timeout: Duration) -> &mut Self;
 
-		#[chain]
 		pub fn set_recvbuf_size(&mut self, size: i32) -> &mut Self;
 
-		#[chain]
 		pub fn set_sendbuf_size(&mut self, size: i32) -> &mut Self;
 
-		#[chain]
 		#[allow(clippy::impl_trait_in_params)]
 		pub fn payload(&mut self, payload: impl Into<Payload>) -> &mut Self;
 	}

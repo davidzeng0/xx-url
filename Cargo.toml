@@ -10,11 +10,7 @@ num-derive = "0.4.2"
 num-traits = "0.2.19"
 rand = "0.8.5"
 resolv-conf = "0.7.0"
-rustls = { version = "0.23.10", default-features = false, features = [
-	"std",
-	"tls12",
-	"ring",
-] }
+rustls = { version = "0.23.10", default-features = false, features = ["std", "tls12", "ring"] }
 rustls-pemfile = "2.1.2"
 url = "2.5.2"
 x509-parser = "0.16.0"
@@ -24,6 +20,9 @@ pnet_macros_support = "0.35.0"
 simple-dns = "0.7.0"
 xx-core = { git = "https://github.com/davidzeng0/xx-core.git" }
 xx-pulse = { git = "https://github.com/davidzeng0/xx-pulse.git" }
+
+[features]
+xx-doc = ["xx-core/xx-doc", "xx-pulse/xx-doc"]
 
 [lints.rust]
 elided_lifetimes_in_paths = "warn"
