@@ -200,7 +200,7 @@ async fn send_request(
 	if let Some(Payload(body)) = body {
 		let _ = match body {
 			PayloadRepr::Bytes(bytes) => writer.write_all(bytes).await?,
-			PayloadRepr::Stream(stream) => writer.write_from(stream.as_mut()).await?
+			PayloadRepr::Stream(stream) => writer.pipe_from(stream.as_mut()).await?
 		};
 
 		check_interrupt().await?;

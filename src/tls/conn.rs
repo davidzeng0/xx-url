@@ -454,9 +454,7 @@ impl Write for TlsWriteHalf<'_> {
 
 			drop(tls);
 
-			if self.connection.send(&buf, BitFlags::default()).await? == 0 {
-				return Err(short_io_error_unless_interrupt().await);
-			}
+			self.connection.send(&buf, BitFlags::default()).await?;
 		}
 
 		Ok(())
