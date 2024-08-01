@@ -15,6 +15,7 @@ use xx_core::macros::wrapper_functions;
 use xx_core::os::epoll::PollFlag;
 use xx_core::os::socket::{MessageFlag, Shutdown};
 use xx_core::{debug, trace};
+use xx_pulse::net::*;
 
 use super::*;
 use crate::net::conn::{self, Conn, ConnectOptions};

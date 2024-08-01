@@ -1,5 +1,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 
+use xx_pulse::net::*;
+
 use super::stream::Shared;
 use super::*;
 

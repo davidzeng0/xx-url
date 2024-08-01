@@ -1,6 +1,7 @@
 use std::io::SeekFrom;
 
 use xx_core::async_std::io::*;
+use xx_pulse::fs::File;
 
 use super::*;
 

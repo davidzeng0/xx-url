@@ -4,6 +4,7 @@ use xx_core::enumflags2::BitFlags;
 use xx_core::macros::wrapper_functions;
 use xx_core::os::epoll::PollFlag;
 use xx_core::os::socket::Shutdown;
+use xx_pulse::net::*;
 
 use super::*;
 use crate::net::conn::Conn;
